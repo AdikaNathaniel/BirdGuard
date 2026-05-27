@@ -3,19 +3,24 @@ import json
 import socket
 import os
 import numpy as np
+from datetime import datetime
 from picamera2 import Picamera2
 from ultralytics import YOLO
 
 UDP_IP = "127.0.0.1"
 UDP_PORT = 5005
 SAVE_ANNOTATED = True
-SAVE_DIR = "/home/pi/birdguard-test/detections"
+
+# Save folder named with current date and time e.g. detections_2026-05-27_14-30-00
+session_name = datetime.now().strftime("detections_%Y-%m-%d_%H-%M-%S")
+SAVE_DIR = f"/home/pi/birdguard-test/{session_name}"
 
 KNOWN_BIRD_WIDTH_MM = 150
 FOCAL_LENGTH_PIXELS = 500
 CX, CY = 320, 240
 
 os.makedirs(SAVE_DIR, exist_ok=True)
+print(f"Saving detections to: {SAVE_DIR}")
 
 def main():
     print("Loading YOLO model...")
