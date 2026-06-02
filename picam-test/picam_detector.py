@@ -2,6 +2,7 @@ import time
 import json
 import socket
 import os
+import subprocess
 import cv2
 import numpy as np
 from datetime import datetime
@@ -12,6 +13,11 @@ UDP_IP = "127.0.0.1"
 UDP_PORT = 5005
 SAVE_ANNOTATED = True
 RECORD_SECONDS = 10  # How many seconds to record video
+
+# Auto-transfer to PC after each session
+PC_IP = "192.168.43.116"
+PC_USER = "23324"
+PC_DEST_PATH = "/C/Users/23324/Desktop/Projects/BirdGuard/picam-test/detections"
 
 # Session folder named with current date and time
 session_name = datetime.now().strftime("session_%Y-%m-%d_%H-%M-%S")
@@ -144,6 +150,19 @@ def process_video():
     print(f"Saved {detection_count} annotated images to: {DETECTIONS_DIR}")
 
 
+def transfer_to_pc():
+    """Step 3: Transfer session folder to PC via SCP."""
+    print(f"\n--- STEP 3: Transferring session to PC ---")
+    dest = f"{PC_USER}@{PC_IP}:{PC_DEST_PATH}"
+    result = subprocess.run(["scp", "-r", SESSION_DIR, dest], capture_output=True, text=True)
+    if result.returncode == 0:
+        print(f"Transfer complete -> {dest}")
+    else:
+        print(f"Transfer failed: {result.stderr}")
+        print("Tip: Enable OpenSSH Server on your PC and set up SSH keys for passwordless transfer.")
+
+
 if __name__ == "__main__":
     record_video()
     process_video()
+    transfer_to_pc()
