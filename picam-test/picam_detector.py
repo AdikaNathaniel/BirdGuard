@@ -16,18 +16,22 @@ UDP_PORT = 5005
 TARGET_CLASS = "person"       # Change to "bird" for production
 CONFIDENCE_THRESHOLD = 0.5
 LASER_OFF_DELAY = 3.0         # Seconds to keep laser on after last detection
-SAVE_ANNOTATED = True
+FRAME_WIDTH = 640
+FRAME_HEIGHT = 480
+VIDEO_FPS = 20
 
 # Session folder
 session_name = datetime.now().strftime("session_%Y-%m-%d_%H-%M-%S")
 SESSION_DIR = f"/home/pi/birdguard-test/{session_name}"
 DETECTIONS_DIR = f"{SESSION_DIR}/detections"
+VIDEO_PATH = f"{SESSION_DIR}/recording.avi"
 os.makedirs(DETECTIONS_DIR, exist_ok=True)
 
 
 def main():
     print(f"Session: {SESSION_DIR}")
-    print(f"Target: {TARGET_CLASS.upper()} | Confidence threshold: {CONFIDENCE_THRESHOLD}")
+    print(f"Target: {TARGET_CLASS.upper()} | Confidence: {CONFIDENCE_THRESHOLD}")
+    print(f"Video: {VIDEO_PATH}")
 
     # Init UART
     try:
@@ -48,10 +52,17 @@ def main():
 
     # Init camera
     picam2 = Picamera2()
-    config = picam2.create_video_configuration(main={"size": (640, 480), "format": "RGB888"})
+    config = picam2.create_video_configuration(
+        main={"size": (FRAME_WIDTH, FRAME_HEIGHT), "format": "RGB888"}
+    )
     picam2.configure(config)
     picam2.start()
     time.sleep(1)
+
+    # Init video writer — records continuously from the start
+    fourcc = cv2.VideoWriter_fourcc(*'XVID')
+    writer = cv2.VideoWriter(VIDEO_PATH, fourcc, VIDEO_FPS, (FRAME_WIDTH, FRAME_HEIGHT))
+    print(f"Recording started -> {VIDEO_PATH}")
 
     laser_on = False
     last_detection_time = 0
@@ -84,7 +95,6 @@ def main():
 
                     print(f"[{datetime.now().strftime('%H:%M:%S')}] DETECTED: {label.upper()} | conf: {conf:.2f}")
 
-                    # Send UDP payload for future bridge/logging
                     payload = {
                         "timestamp": time.time(),
                         "label": label,
@@ -107,24 +117,30 @@ def main():
                     laser_on = False
                     print(f">>> LASER OFF")
 
-            # Save annotated frame on detection
-            if SAVE_ANNOTATED and detections:
-                annotated = bgr.copy()
+            # --- VIDEO RECORDING ---
+            # Draw bounding boxes on the frame if person detected
+            video_frame = bgr.copy()
+            if detections:
                 for x1, y1, x2, y2, label, conf in detections:
-                    cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                    cv2.putText(annotated, f"{label} {conf:.2f}", (x1, y1 - 8),
+                    cv2.rectangle(video_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    cv2.putText(video_frame, f"{label} {conf:.2f}", (x1, y1 - 8),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
-                cv2.imwrite(f"{DETECTIONS_DIR}/frame_{frame_count:05d}.jpg", annotated)
+                # Save detection snapshot as well
+                cv2.imwrite(f"{DETECTIONS_DIR}/frame_{frame_count:05d}.jpg", video_frame)
                 detection_count += 1
 
+            # Write frame to video (always)
+            writer.write(video_frame)
             frame_count += 1
 
     except KeyboardInterrupt:
-        print(f"\n\nStopped. {frame_count} frames processed, {detection_count} detections saved.")
+        print(f"\n\nStopped. {frame_count} frames | {detection_count} detections")
+        print(f"Video saved: {VIDEO_PATH}")
     finally:
         if laser_on and ser:
             ser.write(b'F')
             print("Laser OFF (cleanup)")
+        writer.release()
         picam2.stop()
         if ser:
             ser.close()
