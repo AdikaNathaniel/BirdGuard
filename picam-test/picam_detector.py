@@ -6,7 +6,8 @@ import os
 import cv2
 from datetime import datetime
 from picamera2 import Picamera2
-from ultralytics import YOLO
+from rfdetr import RFDETRNano
+from rfdetr.assets.coco_classes import COCO_CLASSES
 
 # --- CONFIG ---
 SERIAL_PORT = '/dev/serial0'
@@ -18,7 +19,7 @@ CONFIDENCE_THRESHOLD = 0.5
 LASER_OFF_DELAY = 3.0         # Seconds to keep laser on after last detection
 FRAME_WIDTH = 640
 FRAME_HEIGHT = 480
-VIDEO_FPS = 20
+VIDEO_FPS = 30
 
 # Session folder
 session_name = datetime.now().strftime("session_%Y-%m-%d_%H-%M-%S")
@@ -45,15 +46,16 @@ def main():
     # Init UDP socket
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-    # Load YOLO
-    print("Loading YOLOv8n...")
-    model = YOLO("yolov8n.pt")
+    # Load RF-DETR
+    print("Loading RF-DETR (Nano)...")
+    model = RFDETRNano()
     print("Model loaded.")
 
     # Init camera
     picam2 = Picamera2()
     config = picam2.create_video_configuration(
-        main={"size": (FRAME_WIDTH, FRAME_HEIGHT), "format": "RGB888"}
+        main={"size": (FRAME_WIDTH, FRAME_HEIGHT), "format": "RGB888"},
+        controls={"FrameRate": VIDEO_FPS}
     )
     picam2.configure(config)
     picam2.start()
@@ -76,21 +78,19 @@ def main():
             frame = picam2.capture_array()
             bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
-            results = model(bgr, verbose=False)[0]
+            results = model.predict(frame, threshold=CONFIDENCE_THRESHOLD)
             target_found = False
             detections = []
 
-            for result in results.boxes:
-                cls = int(result.cls[0])
-                label = model.names[cls]
-                conf = float(result.conf[0])
+            for xyxy, conf, class_id in zip(results.xyxy, results.confidence, results.class_id):
+                label = COCO_CLASSES.get(int(class_id), str(class_id))
 
-                if label == TARGET_CLASS and conf >= CONFIDENCE_THRESHOLD:
+                if label == TARGET_CLASS:
                     target_found = True
                     last_detection_time = time.time()
 
-                    box = result.xyxy[0].cpu().numpy()
-                    x1, y1, x2, y2 = map(int, box)
+                    x1, y1, x2, y2 = map(int, xyxy)
+                    conf = float(conf)
                     detections.append((x1, y1, x2, y2, label, conf))
 
                     print(f"[{datetime.now().strftime('%H:%M:%S')}] DETECTED: {label.upper()} | conf: {conf:.2f}")
