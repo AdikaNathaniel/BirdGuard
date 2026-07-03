@@ -32,6 +32,7 @@ pip install --resume-retries 5 \
     opencv-python \
     supervision \
     ultralytics \
+    rfdetr \
     picamera2
 
 # Step 5 - Copy BirdGuard project files
