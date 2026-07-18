@@ -22,7 +22,7 @@ void setup() {
   tiltServo.attach(10);
 
   pinMode(LASER_PIN, OUTPUT);
-  digitalWrite(LASER_PIN, HIGH); // Laser OFF (active LOW module)
+  analogWrite(LASER_PIN, 0); // Laser OFF (PWM module, active HIGH)
 
   panServo.write(panStop);
   tiltServo.write(tiltStop);
@@ -51,11 +51,11 @@ void loop() {
       case 'l': nudge(panServo,  panStop - speedOffset);  break;
 
       case 'o': case 'O':
-        digitalWrite(LASER_PIN, LOW); // Active LOW = ON
+        analogWrite(LASER_PIN, 255); // Full ON
         Serial.println("Laser ON");
         break;
       case 'f': case 'F':
-        digitalWrite(LASER_PIN, HIGH); // Active LOW = OFF
+        analogWrite(LASER_PIN, 0); // OFF
         Serial.println("Laser OFF");
         break;
 

@@ -59,7 +59,8 @@ def main():
     )
     picam2.configure(config)
     picam2.start()
-    time.sleep(1)
+    picam2.set_controls({"AwbEnable": True, "Saturation": 1.5, "Brightness": 0.2})
+    time.sleep(2)
 
     # Init video writer — records continuously from the start
     fourcc = cv2.VideoWriter_fourcc(*'XVID')
@@ -77,6 +78,9 @@ def main():
         while True:
             frame = picam2.capture_array()
             bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+
+            if frame_count < 5:
+                print(f"DEBUG frame {frame_count}: R={frame[:,:,0].mean():.1f} G={frame[:,:,1].mean():.1f} B={frame[:,:,2].mean():.1f}")
 
             results = model.predict(frame, threshold=CONFIDENCE_THRESHOLD)
             target_found = False

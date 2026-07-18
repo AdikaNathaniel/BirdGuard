@@ -104,6 +104,11 @@ pip install ultralytics opencv-python supervision picamera2 depthai blobconverte
 python3 -c "from picamera2 import Picamera2; print(Picamera2.global_camera_info())"
 ```
 
+### Check if camera is detected (libcamera, alternative)
+```bash
+rpicam-still --list-cameras
+```
+
 ### Check camera config
 ```bash
 grep -i camera /boot/firmware/config.txt
