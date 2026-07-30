@@ -6,8 +6,7 @@ import os
 import cv2
 from datetime import datetime
 from picamera2 import Picamera2
-from rfdetr import RFDETRNano
-from rfdetr.assets.coco_classes import COCO_CLASSES
+from ultralytics import YOLO
 
 # --- CONFIG ---
 SERIAL_PORT = '/dev/serial0'
@@ -46,9 +45,9 @@ def main():
     # Init UDP socket
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-    # Load RF-DETR
-    print("Loading RF-DETR (Nano)...")
-    model = RFDETRNano()
+    # Load YOLOv8
+    print("Loading YOLOv8 (n)...")
+    model = YOLO("yolov8n.pt")
     print("Model loaded.")
 
     # Init camera
@@ -90,19 +89,20 @@ def main():
             if frame_count < 5:
                 print(f"DEBUG frame {frame_count}: R={frame[:,:,0].mean():.1f} G={frame[:,:,1].mean():.1f} B={frame[:,:,2].mean():.1f}")
 
-            results = model.predict(frame, threshold=CONFIDENCE_THRESHOLD)
+            results = model.predict(frame, conf=CONFIDENCE_THRESHOLD, verbose=False)[0]
             target_found = False
             detections = []
 
-            for xyxy, conf, class_id in zip(results.xyxy, results.confidence, results.class_id):
-                label = COCO_CLASSES.get(int(class_id), str(class_id))
+            for box in results.boxes:
+                class_id = int(box.cls[0])
+                label = model.names[class_id]
 
                 if label == TARGET_CLASS:
                     target_found = True
                     last_detection_time = time.time()
 
-                    x1, y1, x2, y2 = map(int, xyxy)
-                    conf = float(conf)
+                    x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+                    conf = float(box.conf[0])
                     detections.append((x1, y1, x2, y2, label, conf))
 
                     print(f"[{datetime.now().strftime('%H:%M:%S')}] DETECTED: {label.upper()} | conf: {conf:.2f}")
