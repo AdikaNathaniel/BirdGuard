@@ -18,7 +18,7 @@ CONFIDENCE_THRESHOLD = 0.5
 LASER_OFF_DELAY = 3.0         # Seconds to keep laser on after last detection
 FRAME_WIDTH = 640
 FRAME_HEIGHT = 480
-VIDEO_FPS = 30
+VIDEO_FPS = 60
 
 # Session folder
 session_name = datetime.now().strftime("session_%Y-%m-%d_%H-%M-%S")
