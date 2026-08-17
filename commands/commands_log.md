@@ -39,6 +39,25 @@ pio device list
 
 ---
 
+## GPIO Control (Pi -> Nano laser bridge)
+
+### Drive GPIO12 HIGH (laser ON signal)
+```bash
+pinctrl set 12 op dh
+```
+
+### Drive GPIO12 LOW (laser OFF signal)
+```bash
+pinctrl set 12 op dl
+```
+
+### Read back GPIO12 state
+```bash
+pinctrl get 12
+```
+
+---
+
 ## SSH & Networking
 
 ### Clear old SSH host key

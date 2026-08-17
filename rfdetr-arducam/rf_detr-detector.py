@@ -18,8 +18,9 @@ UDP_PORT = 5005
 TARGET_CLASS = "person"       # Change to "bird" for production
 CONFIDENCE_THRESHOLD = 0.5
 LASER_OFF_DELAY = 3.0         # Seconds to keep laser on after last detection
-FRAME_WIDTH = 640
-FRAME_HEIGHT = 480
+FRAME_WIDTH = 640      # Camera capture resolution. RF-DETR inference always
+FRAME_HEIGHT = 480     # runs at this same resolution (captured frame is fed
+                        # to model.predict() unresized).
 VIDEO_FPS = 30
 WINDOW_NAME = "BirdGuard - RF-DETR"
 
