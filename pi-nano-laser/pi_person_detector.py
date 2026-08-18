@@ -1,8 +1,8 @@
 import time
 import json
-import serial
 import socket
 import os
+import subprocess
 import cv2
 import numpy as np
 from datetime import datetime
@@ -12,11 +12,10 @@ from hailo_platform import (HEF, VDevice, HailoStreamInterface, InferVStreams,
                              FormatType)
 
 # --- CONFIG ---
-SERIAL_PORT = '/dev/serial0'
-SERIAL_BAUD = 9600
+LASER_GPIO = 12               # Pi GPIO12 -> Nano D2 -> Nano D6 -> laser
 UDP_IP = "127.0.0.1"
 UDP_PORT = 5005
-TARGET_CLASS = "person"       # Change to "bird" for production
+TARGET_CLASS = "person"
 CONFIDENCE_THRESHOLD = 0.5
 LASER_OFF_DELAY = 3.0         # Seconds to keep laser on after last detection
 FRAME_WIDTH = 640
@@ -51,19 +50,21 @@ VIDEO_PATH = f"{SESSION_DIR}/recording.avi"
 os.makedirs(DETECTIONS_DIR, exist_ok=True)
 
 
+def set_laser_gpio(high: bool):
+    state = "dh" if high else "dl"
+    try:
+        subprocess.run(["pinctrl", "set", str(LASER_GPIO), "op", state], check=True)
+    except Exception as e:
+        print(f"pinctrl call failed: {e}")
+
+
 def main():
     print(f"Session: {SESSION_DIR}")
     print(f"Target: {TARGET_CLASS.upper()} | Confidence: {CONFIDENCE_THRESHOLD}")
     print(f"Video: {VIDEO_PATH}")
+    print(f"Laser trigger: GPIO{LASER_GPIO} -> Nano D2 -> Nano D6 -> laser")
 
-    # Init UART
-    try:
-        ser = serial.Serial(SERIAL_PORT, SERIAL_BAUD, timeout=1)
-        time.sleep(1)
-        print(f"UART ready: {SERIAL_PORT} @ {SERIAL_BAUD} baud")
-    except Exception as e:
-        print(f"UART not available: {e}")
-        ser = None
+    set_laser_gpio(False)  # laser OFF at startup
 
     # Init UDP socket
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -178,17 +179,15 @@ def main():
                                 }
                                 sock.sendto(json.dumps(payload).encode(), (UDP_IP, UDP_PORT))
 
-                        # --- LASER CONTROL ---
+                        # --- LASER CONTROL (Pi GPIO12 -> Nano D2 -> Nano D6 -> laser) ---
                         if target_found and not laser_on:
-                            if ser:
-                                ser.write(b'O')
+                            set_laser_gpio(True)
                             laser_on = True
                             print(">>> LASER ON")
 
                         elif not target_found and laser_on:
                             if time.time() - last_detection_time > LASER_OFF_DELAY:
-                                if ser:
-                                    ser.write(b'F')
+                                set_laser_gpio(False)
                                 laser_on = False
                                 print(">>> LASER OFF")
 
@@ -219,14 +218,12 @@ def main():
                     print(f"\n\nStopped. {frame_count} frames | {detection_count} detections")
                     print(f"Video saved: {VIDEO_PATH}")
                 finally:
-                    if laser_on and ser:
-                        ser.write(b'F')
+                    if laser_on:
+                        set_laser_gpio(False)
                         print("Laser OFF (cleanup)")
                     writer.release()
                     picam2.stop()
                     cv2.destroyAllWindows()
-                    if ser:
-                        ser.close()
                     sock.close()
 
 

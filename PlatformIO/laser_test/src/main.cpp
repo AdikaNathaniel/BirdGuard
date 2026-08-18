@@ -4,7 +4,7 @@
 // Laser 12V/GND power comes straight from its own 12V adapter, always on --
 // the PWM pin alone handles on/off and brightness (0 = off, 255 = full on).
 // Signal path: Pi UART -> Nano RX (D0) -> this sketch -> Nano D5 -> laser PWM pin.
-const int LASER_PIN = 5;
+const int LASER_PIN = 6;
 
 void setup() {
   pinMode(LASER_PIN, OUTPUT);
