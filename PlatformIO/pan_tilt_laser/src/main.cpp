@@ -1,11 +1,11 @@
 #include <Arduino.h>
 #include <Servo.h>
 
+// Pan-tilt only for now -- laser control stripped out to isolate and test
+// servo movement first. Servo signal wires: pan -> D9, tilt -> D10.
+// Servo VCC/GND wired separately (external 5V supply, common ground).
 Servo panServo;
 Servo tiltServo;
-
-// --- PINS ---
-const int LASER_PIN = 5;
 
 // --- CALIBRATION ---
 int panStop = 90;
@@ -21,17 +21,13 @@ void setup() {
   panServo.attach(9);
   tiltServo.attach(10);
 
-  pinMode(LASER_PIN, OUTPUT);
-  analogWrite(LASER_PIN, 0); // Laser OFF (PWM module, active HIGH)
-
   panServo.write(panStop);
   tiltServo.write(tiltStop);
 
   Serial.begin(9600);
-  Serial.println("--- Pan-Tilt-Laser System ---");
+  Serial.println("--- Pan-Tilt System (laser disabled for now) ---");
   Serial.println("CONTINUOUS: W/S (Tilt), A/D (Pan)");
   Serial.println("NUDGE:      I/K (Tilt), J/L (Pan)");
-  Serial.println("LASER:      O (On), F (Off)");
   Serial.println("STOP ALL:   Spacebar or X");
 }
 
@@ -49,15 +45,6 @@ void loop() {
       case 'k': nudge(tiltServo, tiltStop - speedOffset); break;
       case 'j': nudge(panServo,  panStop + speedOffset);  break;
       case 'l': nudge(panServo,  panStop - speedOffset);  break;
-
-      case 'o': case 'O':
-        analogWrite(LASER_PIN, 255); // Full ON
-        Serial.println("Laser ON");
-        break;
-      case 'f': case 'F':
-        analogWrite(LASER_PIN, 0); // OFF
-        Serial.println("Laser OFF");
-        break;
 
       case 'x': case ' ':
         stopAll();
