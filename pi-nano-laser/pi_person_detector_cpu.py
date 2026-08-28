@@ -15,8 +15,8 @@ UDP_PORT = 5005
 TARGET_CLASS = "person"
 CONFIDENCE_THRESHOLD = 0.5
 LASER_OFF_DELAY = 3.0         # Seconds to keep laser on after last detection
-FRAME_WIDTH = 1280
-FRAME_HEIGHT = 720
+FRAME_WIDTH = 1920
+FRAME_HEIGHT = 1080
 VIDEO_FPS = 60
 
 # Session folder
