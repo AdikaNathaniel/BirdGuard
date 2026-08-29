@@ -25,9 +25,17 @@ PREVIEW_PORT = 8080           # browse http://<pi-ip>:8080/ for a live MJPEG pre
 
 # Same Atlas cluster/database the NestJS backend uses -- the Pi writes
 # detection events directly, the backend's detection-service only reads.
+# Standard (non-SRV) connection string -- the mongodb+srv:// form needs a
+# DNS TXT record lookup that this network's DNS doesn't handle correctly
+# (SRV lookups work fine, TXT lookups time out even against 8.8.8.8),
+# so the host list is spelled out explicitly to avoid that lookup entirely.
 MONGODB_URI = os.environ.get(
     "MONGODB_URI",
-    "mongodb+srv://adikanathaniel4_db_user:oLAjlIr1kRY31LZQ@cluster0.u4du6ig.mongodb.net/birdguard?appName=Cluster0",
+    "mongodb://adikanathaniel4_db_user:oLAjlIr1kRY31LZQ@"
+    "ac-w0spglj-shard-00-00.u4du6ig.mongodb.net:27017,"
+    "ac-w0spglj-shard-00-01.u4du6ig.mongodb.net:27017,"
+    "ac-w0spglj-shard-00-02.u4du6ig.mongodb.net:27017/"
+    "birdguard?ssl=true&replicaSet=atlas-8gkcz2-shard-0&authSource=admin&appName=Cluster0",
 )
 
 # Session folder
