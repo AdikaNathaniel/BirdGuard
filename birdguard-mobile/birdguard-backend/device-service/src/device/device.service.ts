@@ -74,11 +74,28 @@ export class DeviceService {
   }
 
   async startDetector(): Promise<CommandResult> {
-    return this.runCommand('START_DETECTOR');
+    const result = await this.runCommand('START_DETECTOR');
+    if (!result.success) return result;
+
+    const output = result.output ?? '';
+    if (output.startsWith('STARTED')) {
+      return { success: true, output };
+    }
+    // Process was launched but had already exited by the time we checked -
+    // surface the log tail so the failure is actionable instead of a bare
+    // false "started".
+    return { success: false, error: output || 'Detector process exited immediately after launch' };
   }
 
   async stopDetector(): Promise<CommandResult> {
-    return this.runCommand('STOP_DETECTOR');
+    const result = await this.runCommand('STOP_DETECTOR');
+    if (!result.success) return result;
+
+    const output = result.output ?? '';
+    if (output.includes('STILL_RUNNING')) {
+      return { success: false, error: 'Detector did not stop within the timeout' };
+    }
+    return { success: true, output };
   }
 
   async getDetectorStatus(): Promise<DetectorStatusResult> {

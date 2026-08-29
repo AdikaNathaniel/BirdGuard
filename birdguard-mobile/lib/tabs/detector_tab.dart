@@ -26,6 +26,10 @@ class _DetectorTabState extends State<DetectorTab> {
     super.initState();
     _refreshStatus();
     _statusTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      // Skip while a start/stop is in flight - that action already waits
+      // for the Pi to reach the real end state and refreshes itself when
+      // it completes, so polling concurrently only risks a racy overwrite.
+      if (_startInFlight || _stopInFlight) return;
       _refreshStatus();
     });
   }
@@ -110,7 +114,11 @@ class _DetectorTabState extends State<DetectorTab> {
     final Color dotColor = unknown ? Colors.grey : (running ? Colors.green : Colors.grey);
 
     String label;
-    if (_statusError && _isRunning == null) {
+    if (_startInFlight) {
+      label = 'Detector: Starting…';
+    } else if (_stopInFlight) {
+      label = 'Detector: Stopping…';
+    } else if (_statusError && _isRunning == null) {
       label = 'Detector: Unknown (status unavailable)';
     } else if (unknown) {
       label = 'Detector: Checking…';

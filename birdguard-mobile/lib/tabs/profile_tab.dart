@@ -57,7 +57,6 @@ class _ProfileTabState extends State<ProfileTab> {
   Widget build(BuildContext context) {
     final email = _claims?['email'] as String? ?? '—';
     final username = _claims?['username'] as String? ?? '—';
-    final userType = _claims?['userType'] as String? ?? '—';
     final initial = username.isNotEmpty ? username[0].toUpperCase() : '?';
 
     return SafeArea(
@@ -112,8 +111,6 @@ class _ProfileTabState extends State<ProfileTab> {
                         _buildInfoRow(Icons.email_outlined, 'Email', email),
                         const Divider(height: 1),
                         _buildInfoRow(Icons.person_outline, 'Username', username),
-                        const Divider(height: 1),
-                        _buildInfoRow(Icons.badge_outlined, 'Account type', userType),
                       ],
                     ),
                   ),

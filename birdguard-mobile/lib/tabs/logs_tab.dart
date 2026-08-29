@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../services/api_client.dart';
@@ -18,6 +20,8 @@ class _LogsTabState extends State<LogsTab> {
   bool _hasError = false;
   bool _hasMore = true;
 
+  Timer? _pollTimer;
+
   static const int _pageSize = 30;
 
   @override
@@ -25,13 +29,46 @@ class _LogsTabState extends State<LogsTab> {
     super.initState();
     _loadFirstPage();
     _scrollController.addListener(_onScroll);
+    // The Pi writes detections straight to MongoDB as they happen - without
+    // this, the list only ever changes on a manual pull-to-refresh, so a new
+    // detection never appears while the tab is just sitting open.
+    _pollTimer = Timer.periodic(const Duration(seconds: 8), (_) => _pollForNew());
   }
 
   @override
   void dispose() {
+    _pollTimer?.cancel();
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     super.dispose();
+  }
+
+  /// Fetches the latest page and prepends only entries newer than what's
+  /// already shown, so a background poll never disturbs scroll position or
+  /// re-triggers loading state the way a full `_loadFirstPage()` would.
+  Future<void> _pollForNew() async {
+    if (_isLoading || _isLoadingMore || _detections.isEmpty) return;
+    try {
+      final result = await ApiClient.instance.getDetections(limit: _pageSize);
+      final list = (result['detections'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+      if (!mounted || list.isEmpty) return;
+
+      final latestKnown = _detections.first['detectedAt'] as String?;
+      final newest = <Map<String, dynamic>>[];
+      for (final d in list) {
+        final ts = d['detectedAt'] as String?;
+        if (latestKnown != null && ts != null && ts.compareTo(latestKnown) <= 0) {
+          break; // sorted newest-first, so anything from here on is already shown
+        }
+        newest.add(d);
+      }
+      if (newest.isNotEmpty) {
+        setState(() => _detections.insertAll(0, newest));
+      }
+    } catch (_) {
+      // Silent - a background poll failing isn't worth surfacing; the next
+      // tick (or a manual pull-to-refresh) will catch up.
+    }
   }
 
   void _onScroll() {
