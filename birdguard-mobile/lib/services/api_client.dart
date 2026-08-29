@@ -143,4 +143,19 @@ class ApiClient {
     );
     return _handle(response);
   }
+
+  /// GET /detections (Bearer token) -> { success, detections: [...] }
+  /// [before] (ISO date string) fetches detections older than that
+  /// timestamp, for paginating further back in history.
+  Future<Map<String, dynamic>> getDetections({int limit = 30, String? before}) async {
+    final queryParams = {
+      'limit': '$limit',
+      if (before != null) 'before': before,
+    };
+    final response = await _client.get(
+      _uri('/detections').replace(queryParameters: queryParams),
+      headers: await _headers(auth: true),
+    );
+    return _handle(response);
+  }
 }

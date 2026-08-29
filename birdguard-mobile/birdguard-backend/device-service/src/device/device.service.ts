@@ -30,10 +30,17 @@ export class DeviceService {
   private async runCommand(key: CommandKey): Promise<CommandResult> {
     const command = COMMANDS[key];
     const ssh = new NodeSSH();
+    const execTimeoutMs = Number(this.configService.get('PI_SSH_EXEC_TIMEOUT_MS') ?? 15000);
 
     try {
       await ssh.connect(this.buildConnectionConfig());
-      const result = await ssh.execCommand(command);
+
+      const result = await Promise.race([
+        ssh.execCommand(command),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`Command timed out after ${execTimeoutMs}ms`)), execTimeoutMs),
+        ),
+      ]);
 
       if (result.code !== 0 && result.code !== null) {
         this.logger.warn(`Command ${key} exited with code ${result.code}: ${result.stderr}`);

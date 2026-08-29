@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'dashboard_page.dart';
+import 'main_navigation_page.dart';
 import 'register_page.dart';
 import 'services/api_client.dart';
 
@@ -53,7 +53,7 @@ class _LoginPageState extends State<LoginPage> {
       );
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const DashboardPage()),
+        MaterialPageRoute(builder: (_) => const MainNavigationPage()),
       );
     } on ApiException catch (e) {
       setState(() => _errorMessage = e.message);

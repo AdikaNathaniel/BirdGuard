@@ -1,7 +1,7 @@
 #!/bin/bash
 # Starts Tailscale (so device-service can reach the Pi over the private
-# tailnet) and all three BirdGuard services in one container. If any one
-# of the three node processes dies, this exits so Fly restarts the whole
+# tailnet) and all four BirdGuard services in one container. If any one
+# of the four node processes dies, this exits so Fly restarts the whole
 # machine rather than silently running in a half-broken state.
 set -e
 
@@ -38,8 +38,11 @@ AUTH_PID=$!
 node /app/device-service/dist/main.js &
 DEVICE_PID=$!
 
+node /app/detection-service/dist/main.js &
+DETECTION_PID=$!
+
 node /app/api-gateway/dist/main.js &
 GATEWAY_PID=$!
 
-wait -n "$AUTH_PID" "$DEVICE_PID" "$GATEWAY_PID"
+wait -n "$AUTH_PID" "$DEVICE_PID" "$DETECTION_PID" "$GATEWAY_PID"
 exit $?

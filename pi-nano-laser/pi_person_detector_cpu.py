@@ -5,10 +5,11 @@ import os
 import subprocess
 import threading
 import cv2
-from datetime import datetime
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from picamera2 import Picamera2
 from ultralytics import YOLO
+from pymongo import MongoClient
 
 # --- CONFIG ---
 LASER_GPIO = 12               # Pi GPIO12 -> Nano D2 -> Nano D6 -> laser
@@ -21,6 +22,13 @@ FRAME_WIDTH = 1280
 FRAME_HEIGHT = 720
 VIDEO_FPS = 30
 PREVIEW_PORT = 8080           # browse http://<pi-ip>:8080/ for a live MJPEG preview
+
+# Same Atlas cluster/database the NestJS backend uses -- the Pi writes
+# detection events directly, the backend's detection-service only reads.
+MONGODB_URI = os.environ.get(
+    "MONGODB_URI",
+    "mongodb+srv://adikanathaniel4_db_user:oLAjlIr1kRY31LZQ@cluster0.u4du6ig.mongodb.net/birdguard?appName=Cluster0",
+)
 
 # Session folder
 session_name = datetime.now().strftime("session_%Y-%m-%d_%H-%M-%S")
@@ -36,6 +44,32 @@ def set_laser_gpio(high: bool):
         subprocess.run(["pinctrl", "set", str(LASER_GPIO), "op", state], check=True)
     except Exception as e:
         print(f"pinctrl call failed: {e}")
+
+
+# --- DETECTION LOGGING (writes directly to MongoDB; the backend's
+# detection-service only ever reads this collection, never writes to it) ---
+try:
+    _mongo_client = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=5000)
+    _detections_collection = _mongo_client["birdguard"]["detections"]
+except Exception as e:
+    print(f"MongoDB connection failed (detection logging disabled): {e}")
+    _detections_collection = None
+
+
+def log_detection_event(label, confidence, bbox=None):
+    if _detections_collection is None:
+        return
+    try:
+        doc = {
+            "label": label,
+            "confidence": confidence,
+            "detectedAt": datetime.now(timezone.utc),
+        }
+        if bbox:
+            doc["bbox"] = bbox
+        _detections_collection.insert_one(doc)
+    except Exception as e:
+        print(f"Failed to log detection to MongoDB: {e}")
 
 
 # --- MJPEG PREVIEW (no VNC/X server needed -- view at http://<pi-ip>:PORT/ in any browser) ---
@@ -172,6 +206,12 @@ def main():
                 set_laser_gpio(True)
                 laser_on = True
                 print(">>> LASER ON")
+
+                # Log this as one detection event (not per-frame) -- use
+                # the highest-confidence detection in this frame.
+                top = max(detections, key=lambda d: d[5])
+                x1, y1, x2, y2, top_label, top_conf = top
+                log_detection_event(top_label, top_conf, {"x1": x1, "y1": y1, "x2": x2, "y2": y2})
 
             elif not target_found and laser_on:
                 if time.time() - last_detection_time > LASER_OFF_DELAY:
