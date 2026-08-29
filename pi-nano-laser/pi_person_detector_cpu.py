@@ -3,8 +3,10 @@ import json
 import socket
 import os
 import subprocess
+import threading
 import cv2
 from datetime import datetime
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from picamera2 import Picamera2
 from ultralytics import YOLO
 
@@ -18,6 +20,7 @@ LASER_OFF_DELAY = 3.0         # Seconds to keep laser on after last detection
 FRAME_WIDTH = 1280
 FRAME_HEIGHT = 720
 VIDEO_FPS = 30
+PREVIEW_PORT = 8080           # browse http://<pi-ip>:8080/ for a live MJPEG preview
 
 # Session folder
 session_name = datetime.now().strftime("session_%Y-%m-%d_%H-%M-%S")
@@ -35,7 +38,61 @@ def set_laser_gpio(high: bool):
         print(f"pinctrl call failed: {e}")
 
 
+# --- MJPEG PREVIEW (no VNC/X server needed -- view at http://<pi-ip>:PORT/ in any browser) ---
+latest_frame = None
+latest_frame_lock = threading.Lock()
+
+
+class _MJPEGHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+        self.end_headers()
+        try:
+            while True:
+                with latest_frame_lock:
+                    frame = latest_frame
+                if frame is None:
+                    time.sleep(0.05)
+                    continue
+                ok, jpg = cv2.imencode(".jpg", frame)
+                if not ok:
+                    continue
+                self.wfile.write(b"--frame\r\n")
+                self.wfile.write(b"Content-Type: image/jpeg\r\n\r\n")
+                self.wfile.write(jpg.tobytes())
+                self.wfile.write(b"\r\n")
+                time.sleep(0.05)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
+    def log_message(self, format, *args):
+        pass  # silence per-request access logging
+
+
+def start_preview_server(port=PREVIEW_PORT):
+    server = ThreadingHTTPServer(("0.0.0.0", port), _MJPEGHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
+def get_lan_ip():
+    # Raspberry Pi OS maps the hostname to 127.0.1.1 in /etc/hosts, so
+    # socket.gethostbyname(socket.gethostname()) returns a loopback address
+    # instead of the real LAN IP. Opening a UDP "connection" (no packets
+    # actually sent) forces the OS to pick the real outbound interface.
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        return s.getsockname()[0]
+    except OSError:
+        return "127.0.0.1"
+    finally:
+        s.close()
+
+
 def main():
+    global latest_frame
     print(f"Session: {SESSION_DIR}")
     print(f"Target: {TARGET_CLASS.upper()} | Confidence: {CONFIDENCE_THRESHOLD}")
     print(f"Video: {VIDEO_PATH}")
@@ -67,13 +124,9 @@ def main():
     writer = cv2.VideoWriter(VIDEO_PATH, fourcc, VIDEO_FPS, (FRAME_WIDTH, FRAME_HEIGHT))
     print(f"Recording started -> {VIDEO_PATH}")
 
-    # Live preview needs a display (X11/Wayland). Over a headless SSH session
-    # there isn't one -- Qt hard-aborts the process (not a catchable exception)
-    # if imshow/namedWindow is called with no DISPLAY, so check env vars up
-    # front and never touch a cv2 GUI function at all when headless.
-    headless = not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
-    if headless:
-        print("No display available -- running headless (no live preview). Use Ctrl+C to stop.")
+    start_preview_server()
+    pi_ip = get_lan_ip()
+    print(f"Live preview: http://{pi_ip}:{PREVIEW_PORT}/  (no VNC/X server needed). Use Ctrl+C to stop.")
 
     laser_on = False
     last_detection_time = 0
@@ -143,11 +196,8 @@ def main():
                 writer.write(video_frame)
             frame_count += 1
 
-            if not headless:
-                cv2.imshow("BirdGuard - Live Detection", video_frame)
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    print("\n\n'q' pressed, stopping.")
-                    break
+            with latest_frame_lock:
+                latest_frame = video_frame
 
     except KeyboardInterrupt:
         print(f"\n\nStopped. {frame_count} frames | {detection_count} detections")
