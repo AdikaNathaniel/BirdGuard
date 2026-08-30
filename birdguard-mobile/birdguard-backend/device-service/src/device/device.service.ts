@@ -75,27 +75,48 @@ export class DeviceService {
 
   async startDetector(): Promise<CommandResult> {
     const result = await this.runCommand('START_DETECTOR');
-    if (!result.success) return result;
-
-    const output = result.output ?? '';
-    if (output.startsWith('STARTED')) {
-      return { success: true, output };
+    if (result.success) {
+      const output = result.output ?? '';
+      if (output.startsWith('STARTED')) {
+        return { success: true, output };
+      }
+      // Process was launched but had already exited by the time we checked -
+      // surface the log tail so the failure is actionable instead of a bare
+      // false "started".
+      return { success: false, error: output || 'Detector process exited immediately after launch' };
     }
-    // Process was launched but had already exited by the time we checked -
-    // surface the log tail so the failure is actionable instead of a bare
-    // false "started".
-    return { success: false, error: output || 'Detector process exited immediately after launch' };
+
+    // The exec itself can time out client-side (e.g. under elevated
+    // Tailscale/DERP latency) after the `nohup ... &` process was already
+    // launched on the Pi - nohup fully detaches it from the SSH channel, so
+    // losing the channel doesn't kill it. Don't report a false failure for
+    // something that may have actually succeeded: verify with an
+    // independent, fast status check before giving up.
+    const status = await this.getDetectorStatus();
+    if (status.success && status.running) {
+      return { success: true, output: `STARTED ${status.pid ?? ''}`.trim() };
+    }
+    return result;
   }
 
   async stopDetector(): Promise<CommandResult> {
     const result = await this.runCommand('STOP_DETECTOR');
-    if (!result.success) return result;
-
-    const output = result.output ?? '';
-    if (output.includes('STILL_RUNNING')) {
-      return { success: false, error: 'Detector did not stop within the timeout' };
+    if (result.success) {
+      const output = result.output ?? '';
+      if (output.includes('STILL_RUNNING')) {
+        return { success: false, error: 'Detector did not stop within the timeout' };
+      }
+      return { success: true, output };
     }
-    return { success: true, output };
+
+    // Same reasoning as startDetector: an exec timeout partway through the
+    // stop sequence doesn't necessarily mean the pkill never landed - verify
+    // before reporting a false failure.
+    const status = await this.getDetectorStatus();
+    if (status.success && !status.running) {
+      return { success: true, output: 'STOPPED' };
+    }
+    return result;
   }
 
   async getDetectorStatus(): Promise<DetectorStatusResult> {
