@@ -10,7 +10,7 @@ from adafruit_servokit import ServoKit
 # channels share the same V+ terminal for motor power (e.g. 5V for a
 # standard hobby servo) -- NOT the Pi's 3.3V logic supply.
 PAN_CHANNEL = 0
-TILT_CHANNEL = 15
+TILT_CHANNEL = 4
 
 CENTER_ANGLE = 90
 STEP_DEGREES = 3   # degrees per step
