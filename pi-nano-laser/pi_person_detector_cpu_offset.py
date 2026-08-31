@@ -2,6 +2,7 @@ import time
 import json
 import socket
 import os
+import signal
 import subprocess
 import threading
 import cv2
@@ -11,6 +12,18 @@ from picamera2 import Picamera2
 from ultralytics import YOLO
 from pymongo import MongoClient
 from adafruit_servokit import ServoKit
+
+# Python only auto-converts SIGINT (Ctrl+C) into a catchable KeyboardInterrupt
+# -- SIGTERM (what `pkill`/the backend's STOP_DETECTOR command sends) kills
+# the process immediately by default, skipping every try/finally cleanup
+# below. Route it through the same KeyboardInterrupt path so the laser
+# always gets switched off and the servos always get re-centered/released
+# on stop, not just on Ctrl+C.
+def _handle_sigterm(signum, frame):
+    raise KeyboardInterrupt
+
+
+signal.signal(signal.SIGTERM, _handle_sigterm)
 
 # --- CONFIG ---
 LASER_GPIO = 12               # Pi GPIO12 -> Nano D2 -> Nano D6 -> laser
@@ -99,18 +112,28 @@ def track_person(bbox):
     error_x = person_cx - frame_cx
     error_y = person_cy - frame_cy
 
+    print(f"    [track] bbox center=({person_cx:.0f},{person_cy:.0f}) "
+          f"frame center=({frame_cx:.0f},{frame_cy:.0f}) "
+          f"error=({error_x:.0f},{error_y:.0f})")
+
     # Sign convention below is a starting guess -- flip the +/- if the
     # servo visibly moves away from the person instead of toward them on
     # your specific mounting.
     if abs(error_x) > TRACK_DEAD_ZONE_PX:
         pan_angle += -TRACK_NUDGE_DEGREES if error_x > 0 else TRACK_NUDGE_DEGREES
         pan_angle = max(SERVO_MIN_ANGLE, min(SERVO_MAX_ANGLE, pan_angle))
+        print(f"    [track] -> PAN command: angle={pan_angle}")
         kit.servo[PAN_CHANNEL].angle = pan_angle
+    else:
+        print(f"    [track] pan within dead zone, holding at {pan_angle}")
 
     if abs(error_y) > TRACK_DEAD_ZONE_PX:
         tilt_angle += -TRACK_NUDGE_DEGREES if error_y > 0 else TRACK_NUDGE_DEGREES
         tilt_angle = max(SERVO_MIN_ANGLE, min(SERVO_MAX_ANGLE, tilt_angle))
+        print(f"    [track] -> TILT command: angle={tilt_angle}")
         kit.servo[TILT_CHANNEL].angle = tilt_angle
+    else:
+        print(f"    [track] tilt within dead zone, holding at {tilt_angle}")
 
 
 # --- DETECTION LOGGING (writes directly to MongoDB; the backend's
@@ -260,7 +283,11 @@ def main():
                     conf = float(box.conf[0])
                     detections.append((x1, y1, x2, y2, label, conf))
 
-                    print(f"[{datetime.now().strftime('%H:%M:%S')}] DETECTED: {label.upper()} | conf: {conf:.2f}")
+                    offset_x = ((x1 + x2) / 2) - (FRAME_WIDTH / 2)
+                    offset_y = ((y1 + y2) / 2) - (FRAME_HEIGHT / 2)
+                    print(f"[{datetime.now().strftime('%H:%M:%S')}] DETECTED: {label.upper()} | "
+                          f"conf: {conf:.2f} | center=({(x1 + x2) / 2:.0f},{(y1 + y2) / 2:.0f}) | "
+                          f"offset=({offset_x:.0f},{offset_y:.0f})")
 
                     payload = {
                         "timestamp": time.time(),

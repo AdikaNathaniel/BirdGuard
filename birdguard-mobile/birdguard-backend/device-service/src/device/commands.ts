@@ -22,6 +22,12 @@ export const COMMANDS = {
   // script's print()s sit in memory and never reach detector.log until the
   // buffer fills or the process exits - the process runs fine, the log just
   // looks frozen.
+  // Reverted from the pan/tilt-tracking variant (pi_person_detector_cpu_offset.py)
+  // back to this one on 2026-08-31 -- that variant's servo turned out to
+  // keep spinning even after being commanded back to center (evidence
+  // points to a continuous-rotation servo, which needs a different control
+  // scheme than angle-hold). Revisit once the servo type is confirmed and
+  // the tracking logic is redesigned to match.
   START_DETECTOR:
     'cd ~/BirdGuard/pi-nano-laser && source /home/pi/birdguard-env/bin/activate && ' +
     'nohup python -u pi_person_detector_cpu.py > /home/pi/detector.log 2>&1 < /dev/null & ' +
