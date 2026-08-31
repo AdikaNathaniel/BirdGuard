@@ -67,11 +67,26 @@ class _DetectorTabState extends State<DetectorTab> {
         success ? 'Detector started' : 'Failed to start detector',
         isError: !success,
       );
-      await _refreshStatus();
+      if (success) {
+        // The backend already verifies the real outcome before reporting
+        // success, so trust it directly instead of spending a second SSH
+        // round trip just to re-confirm what this response already told us.
+        final output = result['output']?.toString() ?? '';
+        final pid = RegExp(r'STARTED\s+(\d+)').firstMatch(output)?.group(1);
+        setState(() {
+          _isRunning = true;
+          _pid = pid;
+          _statusError = false;
+        });
+      } else {
+        unawaited(_refreshStatus());
+      }
     } on ApiException catch (e) {
       _showSnackBar('Failed to start detector: ${e.message}', isError: true);
+      unawaited(_refreshStatus());
     } catch (_) {
       _showSnackBar('Failed to start detector: connection error', isError: true);
+      unawaited(_refreshStatus());
     } finally {
       if (mounted) setState(() => _startInFlight = false);
     }
@@ -87,11 +102,21 @@ class _DetectorTabState extends State<DetectorTab> {
         success ? 'Detector stopped' : 'Failed to stop detector',
         isError: !success,
       );
-      await _refreshStatus();
+      if (success) {
+        setState(() {
+          _isRunning = false;
+          _pid = null;
+          _statusError = false;
+        });
+      } else {
+        unawaited(_refreshStatus());
+      }
     } on ApiException catch (e) {
       _showSnackBar('Failed to stop detector: ${e.message}', isError: true);
+      unawaited(_refreshStatus());
     } catch (_) {
       _showSnackBar('Failed to stop detector: connection error', isError: true);
+      unawaited(_refreshStatus());
     } finally {
       if (mounted) setState(() => _stopInFlight = false);
     }
