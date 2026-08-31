@@ -17,6 +17,8 @@ def main():
     print(f"Testing channel {channel}.")
     print("  <number>   -- set angle and hold it (e.g. 88, 90.5)")
     print(f"  p<number>  -- pulse to that angle for {PULSE_SECONDS}s, then auto-release")
+    print("  p<number>,<seconds> -- pulse to that angle for an exact duration you choose")
+    print("               (e.g. p180,1.77), then auto-release")
     print("  t<number>  -- timed test: sends the angle immediately, then waits for you")
     print("               to press Enter the instant it reaches the target -- releases")
     print("               and prints the exact elapsed time")
@@ -54,6 +56,15 @@ def main():
             pulse = cmd.startswith('p')
             value = cmd[1:] if pulse else cmd
 
+            pulse_seconds = PULSE_SECONDS
+            if pulse and ',' in value:
+                value, duration_str = value.split(',', 1)
+                try:
+                    pulse_seconds = float(duration_str)
+                except ValueError:
+                    print("Duration must be a number, e.g. p180,1.77")
+                    continue
+
             try:
                 angle = float(value)
             except ValueError:
@@ -64,8 +75,8 @@ def main():
             kit.servo[channel].angle = angle
 
             if pulse:
-                print(f"Pulsing channel {channel} to {angle} for {PULSE_SECONDS}s...")
-                time.sleep(PULSE_SECONDS)
+                print(f"Pulsing channel {channel} to {angle} for {pulse_seconds}s...")
+                time.sleep(pulse_seconds)
                 kit.servo[channel].angle = None
                 print("Auto-released.")
             else:
