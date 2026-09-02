@@ -1,9 +1,9 @@
 from gpiozero import AngularServo
 from time import sleep
 
-# Initialize the servo on GPIO pin 14
+# Initialize the servo on GPIO pin 15
 # min_pulse_width and max_pulse_width may need to be adjusted for your servo
-servo = AngularServo(14, min_angle=0, max_angle=180, min_pulse_width=0.5/1000, max_pulse_width=2.5/1000)
+servo = AngularServo(15, min_angle=0, max_angle=180, min_pulse_width=0.5/1000, max_pulse_width=2.5/1000)
 
 
 # Function to set the servo angle
