@@ -1,5 +1,7 @@
 import argparse
+import select
 import signal
+import sys
 import time
 
 from adafruit_servokit import ServoKit
@@ -53,6 +55,82 @@ def recurring_sweep(channel, angle, duration):
         print("Released.")
 
 
+def _stdin_ready(timeout):
+    """Non-blocking check for a pending line on stdin -- lets
+    run_pulse_sequence() below watch for the 'r' stop command in between
+    (and during) pulses without pausing playback to block on input()."""
+    ready, _, _ = select.select([sys.stdin], [], [], timeout)
+    return bool(ready)
+
+
+def read_pulse_sequence():
+    """Collects a sequence of (angle, duration) pairs, each typed the same
+    way as a single pulse command (`p<angle>,<seconds>`), one per line,
+    until the user types 'done'."""
+    sequence = []
+    print("Enter each step as p<angle>,<seconds> (e.g. p90,0.70). Type 'done' when finished.")
+    while True:
+        entry = input("  step> ").strip().lower()
+        if entry == 'done':
+            break
+
+        value = entry[1:] if entry.startswith('p') else entry
+        if ',' not in value:
+            print("Enter in the form p<angle>,<seconds>, e.g. p90,0.70 (or 'done' to finish).")
+            continue
+        angle_str, duration_str = value.split(',', 1)
+        try:
+            angle = float(angle_str)
+            duration = float(duration_str)
+        except ValueError:
+            print("Angle and seconds must both be numbers, e.g. p90,0.70")
+            continue
+
+        angle = max(0.0, min(180.0, angle))
+        sequence.append((angle, duration))
+        print(f"  Added step {len(sequence)}: angle={angle}, hold={duration}s.")
+
+    return sequence
+
+
+def run_pulse_sequence(channel, sequence):
+    """Cycles through the given [(angle, duration), ...] steps forever --
+    pulsing to each angle, holding for its duration, then auto-releasing
+    before moving to the next, exactly like a single p<angle>,<seconds>
+    command -- looping back to the start once the sequence ends, until the
+    user types 'r' and presses Enter (checked continuously via _stdin_ready,
+    not just between steps, so it can interrupt mid-hold too)."""
+    if not sequence:
+        print("No steps in the sequence -- nothing to run.")
+        return
+
+    print(f"Recurring sequence ({len(sequence)} step(s)). Type 'r' + Enter at any time to stop.")
+    try:
+        while True:
+            for angle, duration in sequence:
+                print(f"  -> pulsing to {angle} for {duration}s...")
+                kit.servo[channel].angle = angle
+
+                remaining = duration
+                stop_requested = False
+                while remaining > 0:
+                    slice_time = min(0.1, remaining)
+                    if _stdin_ready(slice_time):
+                        if sys.stdin.readline().strip().lower() == 'r':
+                            stop_requested = True
+                            break
+                    remaining -= slice_time
+
+                kit.servo[channel].angle = None  # auto-release, same as a plain pulse
+
+                if stop_requested:
+                    print("Recurring sequence stopped.")
+                    return
+    finally:
+        kit.servo[channel].angle = None
+        print("Released.")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Servo calibration / field-of-view sweep tool.")
     parser.add_argument("--channel", type=int, help="PCA9685 channel to drive (e.g. 0 for pan)")
@@ -77,6 +155,10 @@ def main():
     print("  pr<number>,<seconds> -- recurring: alternates between that angle and its")
     print("               mirror on the other side of center, each held for <seconds>,")
     print("               repeating until you press Ctrl+C (e.g. pr90,0.61)")
+    print("  recur      -- recurring sequence: enter your own list of p<angle>,<seconds>")
+    print("               steps (e.g. p90,0.70 then p140,0.90), then it cycles through")
+    print("               them forever -- pulse, auto-release, next step, repeat from")
+    print("               the start -- until you type 'r'")
     print("  t<number>  -- timed test: sends the angle immediately, then waits for you")
     print("               to press Enter the instant it reaches the target -- releases")
     print("               and prints the exact elapsed time")
@@ -142,6 +224,11 @@ def main():
                 # just the sweep, so Ctrl+C here returns to this prompt
                 # rather than exiting the whole tool.
                 recurring_sweep(channel, angle, duration)
+                continue
+
+            if cmd == 'recur':
+                sequence = read_pulse_sequence()
+                run_pulse_sequence(channel, sequence)
                 continue
 
             # `p<angle>` or `p<angle>,<seconds>`: pulse mode -- move then
