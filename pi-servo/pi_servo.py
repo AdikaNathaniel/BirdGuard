@@ -24,6 +24,7 @@ servo = AngularServo(
 
 
 def move_to(angle):
+    # Clamped to the servo's full physical range as a hard safety limit.
     angle = max(0, min(180, angle))
     servo.angle = angle
     print(f"Up/down angle set to: {angle}")
@@ -49,6 +50,10 @@ def main():
                 print("Servo power OFF")
                 continue
 
+            # Every movement command below requires power to already be on
+            # -- the transistor gate cuts the servo's ground return, so
+            # commanding an angle while power is off would silently do
+            # nothing at the hardware level.
             if not power.value:
                 print("Servo power is off -- send 'on' first.")
                 continue

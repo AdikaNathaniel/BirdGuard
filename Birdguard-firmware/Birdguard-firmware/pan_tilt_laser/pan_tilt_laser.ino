@@ -17,7 +17,9 @@ void setup() {
   panServo.attach(9);
   tiltServo.attach(10);
   
-  // Set up Laser Pin
+  // Set up Laser Pin -- simple digital on/off here (not PWM/analogWrite
+  // like the D6-based laser sketches elsewhere), since this variant
+  // doesn't need brightness control, just a hard on/off signal.
   pinMode(LASER_PIN, OUTPUT);
   digitalWrite(LASER_PIN, LOW); // Start with laser OFF
   

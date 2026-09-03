@@ -38,6 +38,12 @@ def main():
                 continue
 
             if cmd.startswith('t'):
+                # `t<angle>`: measures real-world rotation time by starting
+                # a timer the instant the command is sent, then blocking
+                # on `input()` until the operator confirms (by pressing
+                # Enter) that the servo has visibly reached the target --
+                # used to build the angle-to-duration calibration data
+                # (e.g. 90 deg -> 0.61s) for timed-pulse control.
                 try:
                     angle = float(cmd[1:])
                 except ValueError:
@@ -53,9 +59,14 @@ def main():
                 print(f"Released. Elapsed time: {elapsed:.2f}s")
                 continue
 
+            # `p<angle>` or `p<angle>,<seconds>`: pulse mode -- move then
+            # auto-release after a duration, instead of holding forever.
             pulse = cmd.startswith('p')
             value = cmd[1:] if pulse else cmd
 
+            # An explicit ",<seconds>" suffix overrides the default pulse
+            # duration -- lets a specific measured timing (from a prior
+            # `t<angle>` test) be replayed exactly, e.g. p180,1.77.
             pulse_seconds = PULSE_SECONDS
             if pulse and ',' in value:
                 value, duration_str = value.split(',', 1)
@@ -80,6 +91,10 @@ def main():
                 kit.servo[channel].angle = None
                 print("Auto-released.")
             else:
+                # Plain `<angle>` with no prefix: set and hold indefinitely
+                # until the next command (used for the manual stop-point
+                # sweep -- try values close to 90 and watch for the one
+                # that actually stops the motor).
                 print(f"Set channel {channel} to {angle} (holding)")
 
     finally:

@@ -1,3 +1,7 @@
+# Manual interactive laser control over the Pi<->Nano UART link -- types
+# single-character commands ('o'/'f') to the Nano, which handles the
+# actual laser GPIO on its end; this script only talks serial, no direct
+# GPIO/laser hardware access from the Pi itself.
 import time
 import serial
 

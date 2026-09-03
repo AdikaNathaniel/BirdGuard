@@ -24,6 +24,9 @@ void setup() {
 }
 
 void loop() {
+  // Manual bench-test controller -- reads one command char over USB
+  // serial and moves the servo directly to a fixed position (no ramping/
+  // stepping like the Pi-driven pan/tilt scripts use).
   if (Serial.available() > 0) {
     char cmd = Serial.read();
 

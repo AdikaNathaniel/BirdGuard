@@ -9,6 +9,9 @@ import { JwtStrategy } from './jwt.strategy';
 @Module({
   imports: [
     PassportModule.register({ defaultStrategy: 'jwt' }),
+    // Registers a TCP client pointed at auth-service -- defaults to
+    // 127.0.0.1:3001 since all backend services run in the same
+    // container in production (see start.sh), just on different ports.
     ClientsModule.registerAsync([
       {
         name: 'AUTH_SERVICE',

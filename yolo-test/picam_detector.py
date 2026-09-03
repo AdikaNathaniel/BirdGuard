@@ -29,6 +29,8 @@ os.makedirs(DETECTIONS_DIR, exist_ok=True)
 
 
 def main():
+    # Early experimental variant: YOLOv8 + direct UART to the Nano (no
+    # UDP decoupling like the later pi-nano-laser scripts).
     print(f"Session: {SESSION_DIR}")
     print(f"Target: {TARGET_CLASS.upper()} | Confidence: {CONFIDENCE_THRESHOLD}")
     print(f"Video: {VIDEO_PATH}")

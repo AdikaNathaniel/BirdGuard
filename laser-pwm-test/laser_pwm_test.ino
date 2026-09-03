@@ -33,6 +33,9 @@ void setup() {
 }
 
 void loop() {
+  // Single-character command dispatch over USB serial -- pan/tilt use
+  // continuous speed writes (no auto-stop), laser is driven either fully
+  // on/off or at a stepped 0-9 duty-cycle level.
   if (Serial.available() > 0) {
     char cmd = Serial.read();
 
@@ -54,6 +57,8 @@ void loop() {
       // --- LASER: DUTY STEPS 0-9 ---
       case '0': case '1': case '2': case '3': case '4':
       case '5': case '6': case '7': case '8': case '9': {
+        // Digit character to integer via ASCII subtraction (e.g. '7'-'0'=7),
+        // then rescaled from the 0-9 step range onto the full 0-255 PWM range.
         int step = cmd - '0';           // 0-9
         int duty = map(step, 0, 9, 0, 255);
         setLaser(duty);

@@ -8,6 +8,9 @@ import { AuthService } from './auth.service';
 @Module({
   imports: [
     UsersModule,
+    // JwtModule config here (secret, expiry) is what actually signs
+    // tokens in AuthService.login() -- the JwtStrategy in api-gateway
+    // must be configured with the same JWT_SECRET to verify them.
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

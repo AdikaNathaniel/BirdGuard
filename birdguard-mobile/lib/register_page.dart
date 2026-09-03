@@ -75,8 +75,13 @@ class _RegisterPageState extends State<RegisterPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Registration successful. Please log in.')),
       );
+      // Brief pause so the success message/snackbar is actually visible
+      // before the page navigates away, rather than popping instantly.
       await Future.delayed(const Duration(milliseconds: 600));
       if (!mounted) return;
+      // Registration doesn't log the user in automatically -- pop back to
+      // LoginPage (which this page was pushed from) so they log in with
+      // their new credentials.
       Navigator.of(context).pop();
     } on ApiException catch (e) {
       setState(() => _errorMessage = e.message);

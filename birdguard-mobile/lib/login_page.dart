@@ -47,6 +47,9 @@ class _LoginPageState extends State<LoginPage> {
 
     setState(() => _isLoading = true);
     try {
+      // ApiClient.login() persists the returned JWT via AuthStorage
+      // internally on success -- nothing further needed here beyond
+      // navigating on to the app's main screen.
       await ApiClient.instance.login(
         email: _emailController.text.trim(),
         password: _passwordController.text,
@@ -56,8 +59,12 @@ class _LoginPageState extends State<LoginPage> {
         MaterialPageRoute(builder: (_) => const MainNavigationPage()),
       );
     } on ApiException catch (e) {
+      // Backend-provided error (e.g. "Invalid credentials", 401) --
+      // shown to the user verbatim.
       setState(() => _errorMessage = e.message);
     } catch (e) {
+      // Anything else (network unreachable, timeout, etc.) gets a
+      // generic message rather than a raw exception string.
       setState(() => _errorMessage = 'Could not reach the server. Please try again.');
     } finally {
       if (mounted) setState(() => _isLoading = false);

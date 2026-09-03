@@ -6,6 +6,9 @@ export type UserDocument = HydratedDocument<User>;
 
 @Schema({ timestamps: true })
 export class User {
+  // lowercase: true normalizes on save, so "User@Example.com" and
+  // "user@example.com" are treated as the same account by the unique
+  // index rather than colliding only sometimes depending on casing.
   @Prop({ required: true, unique: true, trim: true, lowercase: true })
   email: string;
 

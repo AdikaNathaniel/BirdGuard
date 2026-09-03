@@ -14,6 +14,8 @@ void setup() {
 }
 
 void loop() {
+  // Reads one command character at a time from USB serial -- runs every
+  // loop iteration but only acts when a new byte has actually arrived.
   if (Serial.available() > 0) {
     char cmd = Serial.read();
 

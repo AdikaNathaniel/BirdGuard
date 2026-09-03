@@ -41,6 +41,9 @@ try:
     while True:
         frame = picam2.capture_array()  # RGB888
         frame = cv2.flip(frame, -1)  # 180 degree flip (physical camera mount is upside-down)
+        # picamera2 delivers RGB, but OpenCV's imshow/VideoWriter expect
+        # BGR channel order -- without this conversion, colors would be
+        # visibly wrong (red/blue swapped) in both the preview and the file.
         bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
         cv2.imshow(WINDOW_NAME, bgr)

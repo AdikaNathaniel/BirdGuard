@@ -9,6 +9,9 @@ void setup() {
 }
 
 void loop() {
+    // Minimal end-to-end smoke test: confirms serial commands from the Pi
+    // actually reach the Nano and the Nano can actuate an output pin --
+    // the simplest possible link check before anything more complex.
     if (Serial.available()) {
         char cmd = Serial.read();
         if (cmd == 'B' || cmd == 'b') {

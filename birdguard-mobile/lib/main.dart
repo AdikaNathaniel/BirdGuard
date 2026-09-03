@@ -11,6 +11,10 @@ class BirdGuardApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Single accent color driving the whole app's theme -- white
+    // backgrounds throughout, this blue for buttons/links/focus states,
+    // set centrally here so every screen stays visually consistent
+    // without repeating color values at each widget.
     const Color accentBlue = Color(0xFF1976D2);
 
     return MaterialApp(

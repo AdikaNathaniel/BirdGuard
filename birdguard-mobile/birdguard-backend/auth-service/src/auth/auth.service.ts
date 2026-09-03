@@ -20,6 +20,10 @@ export class AuthService {
   ) {}
 
   async register(dto: RegisterDto) {
+    // Checked up front (not just relying on the DB's unique index) so a
+    // duplicate email vs. duplicate username can be distinguished in the
+    // response message -- the DB-level catch below is still the real
+    // safety net against a race between this check and the insert.
     const existing = await this.userModel.findOne({
       $or: [{ email: dto.email }, { username: dto.username }],
     });
@@ -41,10 +45,15 @@ export class AuthService {
         userType: dto.userType ?? UserType.CUSTOMER,
       });
 
+      // Never return the password hash to the client, even on the
+      // successful registration response.
       const safeUser = user.toObject();
       delete (safeUser as { passwordHash?: string }).passwordHash;
       return safeUser;
     } catch (err) {
+      // Catches the rare race where two requests pass the existence
+      // check above simultaneously and both attempt to insert -- the
+      // DB's unique index rejects the second one.
       this.logger.error('Failed to create user', err as Error);
       return { statusCode: 409, message: 'Email or username already registered' };
     }
@@ -62,6 +71,9 @@ export class AuthService {
       return { statusCode: 401, message: 'Invalid credentials' };
     }
 
+    // Deliberately the same generic "Invalid credentials" message for
+    // both "no such user" and "wrong password" above -- doesn't reveal
+    // to an attacker whether a given email is actually registered.
     const payload = {
       sub: user._id.toString(),
       email: user.email,

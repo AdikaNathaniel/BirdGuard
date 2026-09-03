@@ -19,6 +19,9 @@ from datetime import datetime
 
 
 def sanitize_cwd(cwd: str) -> str:
+    # Mirrors Claude Code's own folder-naming scheme for session storage:
+    # lowercase drive letter, then every path separator/colon replaced
+    # with a hyphen -- must match exactly or the session folder won't be found.
     return (cwd[0].lower() + cwd[1:]).replace(":", "-").replace("\\", "-").replace("/", "-")
 
 
@@ -31,6 +34,9 @@ def find_session_dir(project_root: Path) -> Path:
 
 
 def list_transcripts(session_dir: Path, all_sessions: bool):
+    # Sorted oldest-to-newest by modification time; default behavior only
+    # keeps the last one (the current/most recent session) unless --all
+    # was passed on the command line.
     jsonl_files = sorted(session_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime)
     if not jsonl_files:
         raise SystemExit(f"No .jsonl transcripts found in {session_dir}")
@@ -38,6 +44,11 @@ def list_transcripts(session_dir: Path, all_sessions: bool):
 
 
 def extract_text(content) -> str:
+    # A transcript message's `content` is either a plain string, or a list
+    # of typed blocks (text / tool_use / etc, per Claude's API message
+    # format) -- this flattens either shape into one plain-text string,
+    # summarizing tool calls as a one-line "[ran X: Y]" note rather than
+    # dumping their full raw input.
     if isinstance(content, str):
         return content
     parts = []
@@ -54,6 +65,9 @@ def extract_text(content) -> str:
 
 
 def build_log(transcript_path: Path) -> str:
+    # Reads the JSONL transcript one line (= one message) at a time,
+    # skipping anything that isn't valid JSON or isn't a user/assistant
+    # turn (system/tool-result entries are omitted from the readable log).
     lines = [f"## Session: {transcript_path.stem}\n"]
     with open(transcript_path, "r", encoding="utf-8") as f:
         for raw in f:

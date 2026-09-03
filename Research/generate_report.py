@@ -14,7 +14,10 @@ doc = SimpleDocTemplate(OUTPUT, pagesize=A4,
 
 styles = getSampleStyleSheet()
 
-# Custom styles
+# Custom styles -- a named ParagraphStyle per role (title, heading, body
+# text, table captions, references, etc.) so each is applied consistently
+# throughout the document just by reference, rather than repeating font/
+# color/spacing settings at every call site below.
 title_style = ParagraphStyle('Title', parent=styles['Title'],
     fontSize=16, textColor=colors.HexColor('#1a1a2e'), spaceAfter=6,
     alignment=TA_CENTER, fontName='Helvetica-Bold')
@@ -43,6 +46,9 @@ ref_style = ParagraphStyle('Ref', parent=styles['Normal'],
     fontSize=8.5, leading=13, spaceAfter=4, alignment=TA_JUSTIFY,
     fontName='Helvetica')
 
+# `story` is reportlab's flowable list -- appending Paragraph/Table/
+# Spacer/PageBreak objects in order defines the document's full content
+# and layout; nothing renders until doc.build(story) at the very end.
 story = []
 
 # Title section

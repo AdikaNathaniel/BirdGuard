@@ -65,7 +65,12 @@ def main():
                 label = model.names[cls]
 
                 # --- Imitation Depth / Spatial Math ---
-                # Since this is "no oak", we calculate depth manually based on box size
+                # Since this is "no oak" (no stereo depth sensor like the
+                # OAK-D Lite scripts have), depth is *estimated* here from
+                # bounding-box size alone -- assumes birds are roughly a
+                # known real-world width, so a smaller box implies farther
+                # away. Much less accurate than real stereo depth, but
+                # needs only a single regular webcam.
                 box_w = x2 - x1
                 box_h = y2 - y1
                 center_x = x1 + box_w // 2

@@ -16,6 +16,11 @@ interface ErrorShape {
   message: string;
 }
 
+// A TCP microservice call can't naturally propagate an HTTP exception --
+// auth-service returns a plain object shaped like one instead, and this
+// gateway re-throws it as a real HttpException here so the mobile app
+// still sees the correct status code (e.g. 409 for a duplicate email)
+// rather than every failure coming back as a generic error.
 function isErrorShape(value: unknown): value is ErrorShape {
   return (
     !!value &&

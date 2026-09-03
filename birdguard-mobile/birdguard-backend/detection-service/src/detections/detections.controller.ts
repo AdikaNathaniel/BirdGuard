@@ -17,7 +17,13 @@ export class DetectionsController {
 
   @MessagePattern({ cmd: 'getDetections' })
   async getDetections(@Payload() query: GetDetectionsQuery) {
+    // Clamped to 1-200 regardless of what the caller asks for -- a
+    // malformed or malicious `limit` value can't force an unbounded
+    // query against the collection.
     const limit = Math.min(Math.max(query?.limit ?? 50, 1), 200);
+    // Cursor-based pagination: `before` selects everything older than
+    // the given timestamp, so paging through results is stable even if
+    // new detections keep being inserted while the user scrolls.
     const filter = query?.before ? { detectedAt: { $lt: new Date(query.before) } } : {};
 
     const detections = await this.detectionModel

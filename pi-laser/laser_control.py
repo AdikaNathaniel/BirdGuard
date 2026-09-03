@@ -36,6 +36,11 @@ import time
 
 from gpiozero import PWMOutputDevice
 
+# Reads one raw keypress with no Enter needed. termios/tty (Unix/Pi) and
+# msvcrt (Windows) are mutually exclusive stdlib modules, so whichever
+# import succeeds picks the right implementation for the current OS --
+# lets this same script run for local testing on a dev Windows machine,
+# not just on the Pi itself.
 try:
     import termios
     import tty

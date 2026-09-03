@@ -33,6 +33,9 @@ os.makedirs(DETECTIONS_DIR, exist_ok=True)
 
 
 def main():
+    # Arducam variant -- loads a camera-specific tuning file for accurate
+    # color reproduction (the Arducam 64MP sensor needs this explicitly;
+    # the stock Pi Camera Module doesn't).
     print(f"Session: {SESSION_DIR}")
     print(f"Target: {TARGET_CLASS.upper()} | Confidence: {CONFIDENCE_THRESHOLD}")
     print(f"Video: {VIDEO_PATH}")

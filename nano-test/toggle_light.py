@@ -47,6 +47,9 @@ def bridge(port: str, udp_ip: str, udp_port: int, off_delay: float):
 
             try:
                 while True:
+                    # Short socket timeout so the loop can also check the
+                    # off-delay condition below even while no UDP packets
+                    # are arriving, instead of blocking indefinitely.
                     try:
                         data, _ = sock.recvfrom(4096)
                     except socket.timeout:

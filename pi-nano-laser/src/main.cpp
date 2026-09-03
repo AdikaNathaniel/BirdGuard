@@ -17,6 +17,9 @@ void setup() {
 }
 
 void loop() {
+    // Polls the Pi's GPIO12 state every 500ms and mirrors it straight
+    // onto the laser pin -- no debouncing/edge-detection needed here
+    // since the Pi side already handles on/off timing logic.
     int signal = digitalRead(INPUT_PIN);
 
     if (signal == HIGH) {

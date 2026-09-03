@@ -12,6 +12,10 @@ from ultralytics import YOLO
 from pymongo import MongoClient
 
 # --- CONFIG ---
+# Central tunables for the whole script: which GPIO fires the laser, where
+# detection events get broadcast, what counts as a "person" detection, and
+# the camera/recording settings. Kept together at the top so none of this
+# needs hunting through the rest of the file to adjust.
 LASER_GPIO = 12               # Pi GPIO12 -> Nano D2 -> Nano D6 -> laser
 UDP_IP = "127.0.0.1"
 UDP_PORT = 5005
@@ -38,7 +42,8 @@ MONGODB_URI = os.environ.get(
     "birdguard?ssl=true&replicaSet=atlas-8gkcz2-shard-0&authSource=admin&appName=Cluster0",
 )
 
-# Session folder
+# Session folder -- every run gets its own timestamped directory so
+# recordings/snapshots from different runs never overwrite each other.
 session_name = datetime.now().strftime("session_%Y-%m-%d_%H-%M-%S")
 SESSION_DIR = f"/home/pi/birdguard-test/{session_name}"
 DETECTIONS_DIR = f"{SESSION_DIR}/detections"
@@ -47,6 +52,10 @@ os.makedirs(DETECTIONS_DIR, exist_ok=True)
 
 
 def set_laser_gpio(high: bool):
+    # Drives GPIO12 via the `pinctrl` CLI tool rather than a Python GPIO
+    # library -- this signal is read by the Arduino Nano (D2), not used
+    # to power the laser directly from the Pi. `dh`/`dl` = "digital high"
+    # / "digital low" in pinctrl's own syntax.
     state = "dh" if high else "dl"
     try:
         subprocess.run(["pinctrl", "set", str(LASER_GPIO), "op", state], check=True)
@@ -56,6 +65,9 @@ def set_laser_gpio(high: bool):
 
 # --- DETECTION LOGGING (writes directly to MongoDB; the backend's
 # detection-service only ever reads this collection, never writes to it) ---
+# Connection is attempted once at import time. If it fails (e.g. no
+# internet), the script keeps running with logging silently disabled
+# rather than crashing the whole detector over a non-essential feature.
 try:
     _mongo_client = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=5000)
     _detections_collection = _mongo_client["birdguard"]["detections"]
@@ -65,6 +77,8 @@ except Exception as e:
 
 
 def log_detection_event(label, confidence, bbox=None):
+    # No-ops if the Mongo connection failed at startup -- logging is
+    # best-effort and must never be the reason detection itself breaks.
     if _detections_collection is None:
         return
     try:
@@ -81,12 +95,19 @@ def log_detection_event(label, confidence, bbox=None):
 
 
 # --- MJPEG PREVIEW (no VNC/X server needed -- view at http://<pi-ip>:PORT/ in any browser) ---
+# A tiny built-in HTTP server that streams whatever the main loop most
+# recently wrote into `latest_frame` as a multipart JPEG stream -- the
+# standard "motion JPEG" format most browsers can render natively as a
+# live video feed with an <img> tag, no plugins or special player needed.
 latest_frame = None
 latest_frame_lock = threading.Lock()
 
 
 class _MJPEGHandler(BaseHTTPRequestHandler):
     def do_GET(self):
+        # Every GET request becomes a long-lived stream: send the MJPEG
+        # multipart header once, then keep pushing whatever `latest_frame`
+        # currently holds until the client disconnects.
         self.send_response(200)
         self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
         self.end_headers()
@@ -106,6 +127,8 @@ class _MJPEGHandler(BaseHTTPRequestHandler):
                 self.wfile.write(b"\r\n")
                 time.sleep(0.05)
         except (BrokenPipeError, ConnectionResetError):
+            # Normal when a viewer closes the browser tab / app -- not an
+            # actual error, just the stream ending.
             pass
 
     def log_message(self, format, *args):
@@ -113,6 +136,8 @@ class _MJPEGHandler(BaseHTTPRequestHandler):
 
 
 def start_preview_server(port=PREVIEW_PORT):
+    # Runs on its own daemon thread so the HTTP server can serve viewers
+    # concurrently with the main detection loop, without blocking it.
     server = ThreadingHTTPServer(("0.0.0.0", port), _MJPEGHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server
@@ -142,15 +167,19 @@ def main():
 
     set_laser_gpio(False)  # laser OFF at startup
 
-    # Init UDP socket
+    # UDP socket for broadcasting each detection's bounding box to any
+    # local listener (e.g. a future pan/tilt tracking process) -- fire
+    # and forget, no listener needs to be present for this to work.
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-    # Load YOLOv8
+    # Load YOLOv8 -- the "n" (nano) variant, chosen for CPU inference
+    # speed on the Pi rather than accuracy, since there's no GPU/NPU here.
     print("Loading YOLOv8 (n)...")
     model = YOLO("yolov8n.pt")
     print("Model loaded.")
 
-    # Init camera
+    # Init camera at the configured resolution/frame-rate window via
+    # picamera2 (libcamera) -- RGB888 is what OpenCV/YOLO expect.
     picam2 = Picamera2()
     config = picam2.create_video_configuration(
         main={"size": (FRAME_WIDTH, FRAME_HEIGHT), "format": "RGB888"},
@@ -159,9 +188,10 @@ def main():
     picam2.configure(config)
     picam2.start()
     picam2.set_controls({"AwbEnable": True, "Saturation": 1.5, "Brightness": 0.2})
-    time.sleep(2)
+    time.sleep(2)  # let auto-exposure/auto-white-balance settle before recording starts
 
-    # Init video writer — records continuously from the start
+    # Init video writer — records continuously from the start, not just
+    # during detections, so the full session is available for review.
     fourcc = cv2.VideoWriter_fourcc(*'XVID')
     writer = cv2.VideoWriter(VIDEO_PATH, fourcc, VIDEO_FPS, (FRAME_WIDTH, FRAME_HEIGHT))
     print(f"Recording started -> {VIDEO_PATH}")
@@ -180,6 +210,10 @@ def main():
 
     try:
         while True:
+            # --- CAPTURE + INFERENCE ---
+            # One frame in, one YOLO pass out -- runs synchronously in the
+            # main loop since CPU inference is already the bottleneck here;
+            # no benefit to a separate inference thread.
             frame = picam2.capture_array()
             bgr = frame
 
@@ -187,6 +221,9 @@ def main():
             target_found = False
             detections = []
 
+            # Walk every detected box this frame and keep only the ones
+            # matching TARGET_CLASS ("person") -- YOLO detects many object
+            # classes, but only this one drives the laser/logging below.
             for box in results.boxes:
                 class_id = int(box.cls[0])
                 label = model.names[class_id]
@@ -201,6 +238,10 @@ def main():
 
                     print(f"[{datetime.now().strftime('%H:%M:%S')}] DETECTED: {label.upper()} | conf: {conf:.2f}")
 
+                    # Broadcast this detection's box over UDP -- fire and
+                    # forget, for any downstream process that wants it
+                    # (e.g. pan/tilt tracking), independent of the laser
+                    # and MongoDB logic below.
                     payload = {
                         "timestamp": time.time(),
                         "label": label,
@@ -210,6 +251,10 @@ def main():
                     sock.sendto(json.dumps(payload).encode(), (UDP_IP, UDP_PORT))
 
             # --- LASER CONTROL (Pi GPIO12 -> Nano D2 -> Nano D6 -> laser) ---
+            # Edge-triggered, not level-triggered: the laser turns on once
+            # when a person first appears, and off only after they've been
+            # gone for LASER_OFF_DELAY seconds (debounced so brief gaps in
+            # detection between frames don't flicker the laser on/off).
             if target_found and not laser_on:
                 set_laser_gpio(True)
                 laser_on = True
@@ -228,6 +273,10 @@ def main():
                     print(">>> LASER OFF")
 
             # --- VIDEO RECORDING ---
+            # Every frame gets written to the session's video file
+            # regardless of detections; frames with a person also get a
+            # drawn bounding box + label and a separate annotated snapshot
+            # saved to disk for quick review without scrubbing the video.
             video_frame = bgr.copy()
             if detections:
                 for x1, y1, x2, y2, label, conf in detections:
@@ -237,6 +286,10 @@ def main():
                 cv2.imwrite(f"{DETECTIONS_DIR}/frame_{frame_count:05d}.jpg", video_frame)
                 detection_count += 1
 
+            # Inference doesn't run at a perfectly steady frame rate, so
+            # the frame is written `repeats` times (based on real elapsed
+            # time since the last write) to keep the output video's
+            # playback speed matching real time rather than drifting.
             now = time.time()
             repeats = max(1, round((now - last_write_time) * VIDEO_FPS))
             last_write_time = now
@@ -244,6 +297,8 @@ def main():
                 writer.write(video_frame)
             frame_count += 1
 
+            # Publish this frame for the MJPEG preview server's handler
+            # thread to pick up on its next iteration.
             with latest_frame_lock:
                 latest_frame = video_frame
 
@@ -251,6 +306,8 @@ def main():
         print(f"\n\nStopped. {frame_count} frames | {detection_count} detections")
         print(f"Video saved: {VIDEO_PATH}")
     finally:
+        # Always leave the laser off and release hardware/file handles
+        # cleanly, however the loop above exited.
         if laser_on:
             set_laser_gpio(False)
             print("Laser OFF (cleanup)")

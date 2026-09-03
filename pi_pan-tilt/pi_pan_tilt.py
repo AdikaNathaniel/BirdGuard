@@ -34,6 +34,9 @@ def stop_all():
 
 
 def nudge(servo, speed, stop_value):
+    # Brief timed pulse rather than a sustained hold -- moves for
+    # NUDGE_TIME seconds then snaps back to the stop value, giving a
+    # small, repeatable movement instead of continuous motion.
     servo.value = speed
     time.sleep(NUDGE_TIME)
     servo.value = stop_value
@@ -41,6 +44,10 @@ def nudge(servo, speed, stop_value):
 
 
 def get_key():
+    # Reads one raw keypress with no Enter needed, by temporarily putting
+    # the terminal into "raw" mode (disabling line buffering/echo) for the
+    # duration of the read, then always restoring normal terminal
+    # behavior afterward regardless of what was pressed.
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)
     try:
@@ -62,6 +69,10 @@ def main():
         while True:
             cmd = get_key()
 
+            # WASD = continuous motion: sets a constant speed that keeps
+            # running until a different key changes or stops it (there's
+            # no "key release" event with raw single-char reads, so motion
+            # only stops via Space/X or another WASD key).
             if cmd == 'w':
                 tilt_servo.value = TILT_STOP + SPEED_OFFSET
             elif cmd == 's':
@@ -71,6 +82,7 @@ def main():
             elif cmd == 'd':
                 pan_servo.value = PAN_STOP - SPEED_OFFSET
 
+            # IJKL = nudge: brief timed pulse via nudge(), self-stopping.
             elif cmd == 'i':
                 nudge(tilt_servo, TILT_STOP + SPEED_OFFSET, TILT_STOP)
             elif cmd == 'k':

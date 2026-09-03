@@ -27,6 +27,9 @@ void setup() {
 }
 
 void loop() {
+    // Level-triggered, not edge-triggered: the servo position directly
+    // follows whatever the Pi's pin state currently is, re-checked every
+    // 500ms -- there's no "toggle" behavior, just continuous mirroring.
     int signal = digitalRead(INPUT_PIN);
 
     if (signal == LOW) {

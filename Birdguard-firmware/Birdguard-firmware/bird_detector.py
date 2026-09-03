@@ -25,8 +25,16 @@ def main():
     print(f"Starting Bird Detector with the OAK-D Lite...")
 
     # 3. Create Pipeline
+    # Runs entirely on the OAK-D Lite's own onboard processor (not the
+    # host CPU) -- the host just receives already-processed tracklet
+    # results over USB, unlike the Pi-camera scripts elsewhere in this
+    # project which do inference on the Pi's own CPU.
     pipeline = dai.Pipeline()
 
+    # CAM_A is the color camera (used for detection), CAM_B/C are the
+    # left/right mono cameras feeding stereo depth -- this is what lets
+    # the device report real-world X/Y/Z spatial coordinates per
+    # detection, not just a 2D pixel bounding box.
     camRgb = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_A)
     monoLeft = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_B)
     monoRight = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_C)
@@ -37,26 +45,39 @@ def main():
     leftOutput.link(stereo.left)
     rightOutput.link(stereo.right)
 
+    # Combines the RGB detector (YOLOv10-nano) with the stereo depth map
+    # so each detection carries a real-world distance, not just a 2D box.
     spatialDetectionNetwork = pipeline.create(dai.node.SpatialDetectionNetwork).build(camRgb, stereo, "yolov10-nano")
     objectTracker = pipeline.create(dai.node.ObjectTracker)
 
     spatialDetectionNetwork.setConfidenceThreshold(0.6)
     spatialDetectionNetwork.input.setBlocking(False)
     spatialDetectionNetwork.setBoundingBoxScaleFactor(0.5)
+    # Ignore depth readings outside this range (mm) -- filters out noise
+    # from objects too close to focus or too far for reliable stereo depth.
     spatialDetectionNetwork.setDepthLowerThreshold(100)
     spatialDetectionNetwork.setDepthUpperThreshold(5000)
     labelMap = spatialDetectionNetwork.getClasses()
 
-    # Apply filtering only if not in debug
+    # Apply filtering only if not in debug -- in debug mode every detected
+    # class gets tracked/logged, useful for confirming the pipeline works
+    # at all before narrowing down to just BIRD_LABEL_ID.
     if not debug_mode:
         objectTracker.setDetectionLabelsToTrack([BIRD_LABEL_ID])
-    
+
     objectTracker.setTrackerType(dai.TrackerType.SHORT_TERM_IMAGELESS)
     objectTracker.setTrackerIdAssignmentPolicy(dai.TrackerIdAssignmentPolicy.SMALLEST_ID)
 
+    # Output queues the host-side loop below reads from -- the device
+    # keeps pushing frames/tracklets into these independently of when the
+    # host actually calls .get() on them.
     preview = objectTracker.passthroughTrackerFrame.createOutputQueue()
     tracklets = objectTracker.out.createOutputQueue()
 
+    # Wires the pipeline stages together: detections flow into the
+    # tracker, which assigns persistent IDs across frames (so the same
+    # bird keeps the same `t.id` as it moves, rather than being treated
+    # as a brand-new detection every frame).
     spatialDetectionNetwork.passthrough.link(objectTracker.inputTrackerFrame)
     spatialDetectionNetwork.passthrough.link(objectTracker.inputDetectionFrame)
     spatialDetectionNetwork.out.link(objectTracker.inputDetections)
@@ -73,7 +94,8 @@ def main():
             trackletsData = track.tracklets
             
             for t in trackletsData:
-                # Denormalize ROI logic
+                # Tracklet ROI is stored normalized (0-1); denormalize
+                # against the actual frame size to get real pixel coords.
                 roi = t.roi.denormalize(frame.shape[1], frame.shape[0])
                 x1 = int(roi.topLeft().x)
                 y1 = int(roi.topLeft().y)

@@ -10,6 +10,10 @@ void setup() {
 }
 
 void loop() {
+    // Diagnostic-only sketch -- just reports what it sees on the input
+    // pin every 500ms via Serial, doesn't drive anything itself. Used to
+    // confirm the Pi->Nano signal wire is actually toggling correctly
+    // before trusting a more complex sketch built on top of it.
     int signal = digitalRead(INPUT_PIN);
 
     if (signal == LOW) {

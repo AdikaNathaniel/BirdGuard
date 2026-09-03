@@ -31,11 +31,16 @@ os.makedirs(DETECTIONS_DIR, exist_ok=True)
 
 
 def main():
+    # Early experimental variant using RF-DETR + serial (not UDP-decoupled
+    # GPIO like the later pi-nano-laser scripts) for laser control -- the
+    # UART link goes directly to the Nano over /dev/serial0.
     print(f"Session: {SESSION_DIR}")
     print(f"Target: {TARGET_CLASS.upper()} | Confidence: {CONFIDENCE_THRESHOLD}")
     print(f"Video: {VIDEO_PATH}")
 
-    # Init UART
+    # UART is optional -- if it fails to open, `ser` stays None and every
+    # laser-control call below is skipped, so detection/recording still
+    # works standalone without the Nano connected.
     try:
         ser = serial.Serial(SERIAL_PORT, SERIAL_BAUD, timeout=1)
         time.sleep(1)
@@ -85,6 +90,9 @@ def main():
         while True:
             frame = picam2.capture_array()
             # TEST: skip RGB->BGR conversion, use raw frame as-is (revert after testing)
+            # -- means recorded video/preview colors are inverted (R/B
+            # swapped) until this is reverted; RF-DETR itself is unaffected
+            # since it's fed the raw RGB `frame`, not `bgr`.
             bgr = frame
             # bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 

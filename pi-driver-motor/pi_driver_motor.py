@@ -20,6 +20,9 @@ kit = ServoKit(channels=16)
 
 
 def move_to(channel, angle, label):
+    # Clamped to the servo's full physical range (0-180) as a hard safety
+    # limit -- individual commands below further restrict this to the
+    # 60-120 "safe" window via CENTER_ANGLE +/- STEP_DEGREES*MAX_STEPS.
     angle = max(0, min(180, angle))
     kit.servo[channel].angle = angle
     print(f"{label} angle set to: {angle}")
@@ -41,6 +44,8 @@ def stop_all():
 
 
 def main():
+    # Interactive typed-command loop: u/d step pan, i/k step tilt, c
+    # recenters both, s releases both.
     print("--- Pi -> PCA9685 Pan/Tilt Driver (I2C) ---")
     print(f"Pan:  u1-u{MAX_STEPS} (up in steps), d1-d{MAX_STEPS} (down in steps)")
     print(f"Tilt: i1-i{MAX_STEPS} (up in steps), k1-k{MAX_STEPS} (down in steps)")
@@ -61,6 +66,8 @@ def main():
                 continue
 
             if len(cmd) >= 2 and cmd[0] in ('u', 'd', 'i', 'k'):
+                # First char selects axis + direction (u/d = pan, i/k =
+                # tilt), the rest of the string is the step count.
                 try:
                     step = int(cmd[1:])
                 except ValueError:
@@ -78,6 +85,10 @@ def main():
                     channel, label = TILT_CHANNEL, "Tilt"
                     sign = 1 if cmd[0] == 'i' else -1
 
+                # Always computed as an absolute offset from CENTER_ANGLE,
+                # not incrementally from the current angle -- so repeating
+                # the same command (e.g. u5 twice) lands on the same
+                # angle both times rather than drifting further each time.
                 move_to(channel, CENTER_ANGLE + sign * step * STEP_DEGREES, label)
             else:
                 print("Invalid command. Use u1-u10, d1-d10 (pan), i1-i10, k1-k10 (tilt), c, or s.")

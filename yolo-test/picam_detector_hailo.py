@@ -154,6 +154,10 @@ def main():
                         if 0 <= COCO_CLASSES.index(TARGET_CLASS) < len(raw_detections):
                             class_id = COCO_CLASSES.index(TARGET_CLASS)
                             label = TARGET_CLASS
+                            # Only the TARGET_CLASS slot of the 80-class
+                            # output is read -- the HEF's fused NMS
+                            # postprocess already separates detections by
+                            # class, so no manual class filtering needed.
                             for det in raw_detections[class_id]:
                                 y1n, x1n, y2n, x2n, conf = det
                                 if conf < CONFIDENCE_THRESHOLD:
@@ -162,6 +166,10 @@ def main():
                                 target_found = True
                                 last_detection_time = time.time()
 
+                                # Coordinates come out normalized (0-1)
+                                # relative to MODEL_INPUT_SIZE -- convert to
+                                # pixel coordinates on the actual capture
+                                # frame using the precomputed per-axis scale.
                                 x1 = int(x1n * MODEL_INPUT_SIZE * scale_x)
                                 y1 = int(y1n * MODEL_INPUT_SIZE * scale_y)
                                 x2 = int(x2n * MODEL_INPUT_SIZE * scale_x)

@@ -7,6 +7,9 @@ IMG1 = os.path.join(OUTPUT_DIR, "BirdGuard-Design-1.jpg")
 IMG2 = os.path.join(OUTPUT_DIR, "BirdGurad-Design-2.jpeg")
 
 
+# Small reusable PDF-building helpers (header/footer/section styling) so
+# the actual content below (the two designs' pros/cons) stays free of
+# repeated FPDF styling calls.
 class BirdGuardPDF(FPDF):
     def header(self):
         self.set_font("Helvetica", "B", 20)

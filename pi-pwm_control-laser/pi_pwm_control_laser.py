@@ -21,6 +21,10 @@ pca.channels[CHANNEL].duty_cycle = 0  # laser OFF at startup
 
 
 def set_laser(on: bool):
+    # adafruit_pca9685's duty_cycle is a 16-bit value (0-0xFFFF) regardless
+    # of the chip's native 12-bit PWM resolution -- the library rescales
+    # it internally. 0xFFFF = fully on (100% duty), 0 = fully off; this
+    # laser is only ever driven fully on/off, never a partial duty cycle.
     pca.channels[CHANNEL].duty_cycle = 0xFFFF if on else 0
     print(f"Laser {'ON' if on else 'OFF'}")
 

@@ -7,6 +7,8 @@ import { DeviceController } from './device.controller';
 @Module({
   imports: [
     AuthModule,
+    // TCP client pointed at device-service -- default port 3002,
+    // matches DEVICE_SERVICE_PORT in that service's own .env.
     ClientsModule.registerAsync([
       {
         name: 'DEVICE_SERVICE',

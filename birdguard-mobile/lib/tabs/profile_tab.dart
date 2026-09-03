@@ -21,6 +21,9 @@ class _ProfileTabState extends State<ProfileTab> {
   }
 
   Future<void> _loadClaims() async {
+    // Reads straight from the stored JWT's own payload (email/username)
+    // rather than calling a "get current user" API endpoint -- no such
+    // endpoint exists, and the token already carries this info.
     final claims = await AuthStorage.instance.readClaims();
     if (!mounted) return;
     setState(() {
@@ -32,6 +35,9 @@ class _ProfileTabState extends State<ProfileTab> {
   Future<void> _logout() async {
     await AuthStorage.instance.clearToken();
     if (!mounted) return;
+    // pushAndRemoveUntil clears the entire navigation stack (not just
+    // pushing LoginPage on top) -- so pressing back from the login screen
+    // can't return to the authenticated app.
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => const LoginPage()),
       (route) => false,

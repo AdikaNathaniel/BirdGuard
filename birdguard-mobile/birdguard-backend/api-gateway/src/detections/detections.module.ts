@@ -7,6 +7,8 @@ import { DetectionsController } from './detections.controller';
 @Module({
   imports: [
     AuthModule,
+    // TCP client pointed at detection-service -- default port 3003,
+    // matches DETECTION_SERVICE_PORT in that service's own .env.
     ClientsModule.registerAsync([
       {
         name: 'DETECTION_SERVICE',

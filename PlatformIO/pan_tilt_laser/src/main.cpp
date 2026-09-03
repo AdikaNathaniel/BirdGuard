@@ -54,6 +54,8 @@ void loop() {
 }
 
 void nudge(Servo &s, int speed) {
+  // Brief timed move then snap back to stop -- blocking `delay()` is fine
+  // here since nothing else needs to run concurrently on this simple sketch.
   s.write(speed);
   delay(nudgeTime);
   stopAll();
