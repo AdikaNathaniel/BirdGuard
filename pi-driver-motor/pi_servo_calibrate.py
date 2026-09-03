@@ -19,6 +19,9 @@ def main():
     print(f"  p<number>  -- pulse to that angle for {PULSE_SECONDS}s, then auto-release")
     print("  p<number>,<seconds> -- pulse to that angle for an exact duration you choose")
     print("               (e.g. p180,1.77), then auto-release")
+    print("  pr<number>,<seconds> -- recurring: alternates between that angle and its")
+    print("               mirror on the other side of center, each held for <seconds>,")
+    print("               repeating until you press Ctrl+C (e.g. pr90,0.61)")
     print("  t<number>  -- timed test: sends the angle immediately, then waits for you")
     print("               to press Enter the instant it reaches the target -- releases")
     print("               and prints the exact elapsed time")
@@ -57,6 +60,50 @@ def main():
                 elapsed = time.monotonic() - start
                 kit.servo[channel].angle = None
                 print(f"Released. Elapsed time: {elapsed:.2f}s")
+                continue
+
+            if cmd.startswith('pr'):
+                # `pr<angle>,<seconds>`: recurring oscillation -- alternates
+                # between the given angle and its mirror on the other side
+                # of center (180 - angle), each held for <seconds>, so the
+                # servo sweeps one way then back the other, repeating.
+                # Center (90) is assumed as the mirror point since that's
+                # the standard servo-angle midpoint; if this servo's real
+                # stop point turns out to be elsewhere (see the plain
+                # stop-point sweep above), the two halves of the swing
+                # won't be perfectly symmetric in practice.
+                value = cmd[2:]
+                if ',' not in value:
+                    print("Enter 'pr<angle>,<seconds>', e.g. pr90,0.61")
+                    continue
+                angle_str, duration_str = value.split(',', 1)
+                try:
+                    angle = float(angle_str)
+                    duration = float(duration_str)
+                except ValueError:
+                    print("Enter 'pr<angle>,<seconds>', e.g. pr90,0.61")
+                    continue
+
+                angle = max(0.0, min(180.0, angle))
+                mirror_angle = 180.0 - angle
+
+                print(f"Recurring: {angle} <-> {mirror_angle}, {duration}s each. "
+                      f"Ctrl+C to stop and return to the prompt.")
+                current = angle
+                try:
+                    while True:
+                        kit.servo[channel].angle = current
+                        print(f"  -> {current}")
+                        time.sleep(duration)
+                        current = mirror_angle if current == angle else angle
+                except KeyboardInterrupt:
+                    # Caught here (not by main()'s outer try/finally) so
+                    # only the recurring motion stops -- the tool itself
+                    # keeps running and returns to the prompt below.
+                    print("\nRecurring stopped.")
+                finally:
+                    kit.servo[channel].angle = None
+                    print("Released.")
                 continue
 
             # `p<angle>` or `p<angle>,<seconds>`: pulse mode -- move then
