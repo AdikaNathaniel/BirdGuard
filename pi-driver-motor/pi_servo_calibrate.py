@@ -93,23 +93,43 @@ def read_pulse_sequence():
     return sequence
 
 
-def run_pulse_sequence(channel, sequence):
+def run_pulse_sequence(channel, sequence, interactive=True):
     """Cycles through the given [(angle, duration), ...] steps forever --
     pulsing to each angle, holding for its duration, then auto-releasing
     before moving to the next, exactly like a single p<angle>,<seconds>
-    command -- looping back to the start once the sequence ends, until the
-    user types 'r' and presses Enter (checked continuously via _stdin_ready,
-    not just between steps, so it can interrupt mid-hold too)."""
+    command -- looping back to the start once the sequence ends.
+
+    When `interactive` (the manual `recur` command), stops when the user
+    types 'r' and presses Enter -- checked continuously via _stdin_ready,
+    not just between steps, so it can interrupt mid-hold too.
+
+    When not `interactive` (the mobile app's Settings page, launched
+    non-interactively over SSH with stdin redirected from /dev/null),
+    stdin is never going to receive real input -- select() on a
+    /dev/null-backed stdin reports "ready" immediately and reading it
+    returns EOF forever, which would busy-loop straight through every
+    hold duration instead of actually waiting. So this mode just sleeps
+    normally instead, and relies entirely on the SIGTERM handler above
+    (wired up to the backend's STOP_SERVO_SWEEP command) to stop it."""
     if not sequence:
         print("No steps in the sequence -- nothing to run.")
         return
 
-    print(f"Recurring sequence ({len(sequence)} step(s)). Type 'r' + Enter at any time to stop.")
+    if interactive:
+        print(f"Recurring sequence ({len(sequence)} step(s)). Type 'r' + Enter at any time to stop.")
+    else:
+        print(f"Recurring sequence ({len(sequence)} step(s)). Stop via SIGTERM (the backend's stop action).")
+
     try:
         while True:
             for angle, duration in sequence:
                 print(f"  -> pulsing to {angle} for {duration}s...")
                 kit.servo[channel].angle = angle
+
+                if not interactive:
+                    time.sleep(duration)
+                    kit.servo[channel].angle = None
+                    continue
 
                 remaining = duration
                 stop_requested = False
@@ -134,15 +154,38 @@ def run_pulse_sequence(channel, sequence):
 def main():
     parser = argparse.ArgumentParser(description="Servo calibration / field-of-view sweep tool.")
     parser.add_argument("--channel", type=int, help="PCA9685 channel to drive (e.g. 0 for pan)")
-    parser.add_argument("--angle", type=float, help="Angle (0-180) for a non-interactive recurring sweep")
-    parser.add_argument("--seconds", type=float, help="Seconds to hold each side of the sweep")
+    parser.add_argument("--angle", type=float, help="Angle (0-180) for a non-interactive mirror sweep")
+    parser.add_argument("--seconds", type=float, help="Seconds to hold each side of the mirror sweep")
+    parser.add_argument("--angle1", type=float, help="Step 1 angle (0-180) for a non-interactive two-step sequence")
+    parser.add_argument("--seconds1", type=float, help="Step 1 hold duration in seconds")
+    parser.add_argument("--angle2", type=float, help="Step 2 angle (0-180) for a non-interactive two-step sequence")
+    parser.add_argument("--seconds2", type=float, help="Step 2 hold duration in seconds")
     args = parser.parse_args()
 
-    # If all three are given, skip the interactive prompt entirely and run
-    # the sweep directly -- this is the path the backend uses (it can't
-    # answer an interactive `input()` prompt over a one-shot SSH command).
+    # If all five are given, run the two-step recurring sequence directly,
+    # non-interactively -- this is the path the mobile app's Settings page
+    # uses (the backend launches this over a one-shot SSH command, which
+    # can't answer an interactive `input()` prompt).
+    two_step_args = (args.channel, args.angle1, args.seconds1, args.angle2, args.seconds2)
+    if all(v is not None for v in two_step_args):
+        try:
+            run_pulse_sequence(
+                args.channel,
+                [(args.angle1, args.seconds1), (args.angle2, args.seconds2)],
+                interactive=False,
+            )
+        except KeyboardInterrupt:
+            pass
+        return
+
+    # Older single-angle mirror sweep, kept for backward compatibility --
+    # if all three of these are given instead, skip the interactive
+    # prompt and run that directly.
     if args.channel is not None and args.angle is not None and args.seconds is not None:
-        recurring_sweep(args.channel, args.angle, args.seconds)
+        try:
+            recurring_sweep(args.channel, args.angle, args.seconds)
+        except KeyboardInterrupt:
+            pass
         return
 
     print("--- Servo Stop-Point Calibration ---")

@@ -145,22 +145,26 @@ class ApiClient {
   }
 
   /// POST /device/servo/start (Bearer token)
-  /// body: { angle, seconds, channel? } -> { success, output }
-  /// Starts the field-of-view sweep: the servo oscillates between [angle]
-  /// and its mirror on the other side of center, holding each side for
-  /// [seconds], until stopped. [channel] defaults to 0 (pan) server-side
-  /// if omitted.
+  /// body: { angle1, seconds1, angle2, seconds2, channel? } -> { success, output }
+  /// Starts the field-of-view sweep: the servo cycles between step 1
+  /// ([angle1] held for [seconds1]) and step 2 ([angle2] held for
+  /// [seconds2]), repeating until stopped. [channel] defaults to 0 (pan)
+  /// server-side if omitted.
   Future<Map<String, dynamic>> startServoSweep({
-    required double angle,
-    required double seconds,
+    required double angle1,
+    required double seconds1,
+    required double angle2,
+    required double seconds2,
     int? channel,
   }) async {
     final response = await _client.post(
       _uri('/device/servo/start'),
       headers: await _headers(auth: true),
       body: jsonEncode({
-        'angle': angle,
-        'seconds': seconds,
+        'angle1': angle1,
+        'seconds1': seconds1,
+        'angle2': angle2,
+        'seconds2': seconds2,
         if (channel != null) 'channel': channel,
       }),
     );

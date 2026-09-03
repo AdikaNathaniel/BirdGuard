@@ -143,15 +143,22 @@ export class DeviceService {
   }
 
   /**
-   * Starts the field-of-view sweep (pi_servo_calibrate.py's recurring
-   * oscillation) at the given angle/duration - the Settings page's
-   * "start" action. Defaults to channel 0 (pan), matching the
-   * "field of view" framing: a horizontal sweep, not tilt.
+   * Starts the field-of-view sweep (pi_servo_calibrate.py's two-step
+   * recurring sequence) cycling between (angle1, seconds1) and
+   * (angle2, seconds2) - the Settings page's "start" action. Defaults to
+   * channel 0 (pan), matching the "field of view" framing: a horizontal
+   * sweep, not tilt.
    */
-  async startServoSweep(angle: number, seconds: number, channel = 0): Promise<CommandResult> {
+  async startServoSweep(
+    angle1: number,
+    seconds1: number,
+    angle2: number,
+    seconds2: number,
+    channel = 0,
+  ): Promise<CommandResult> {
     let command: string;
     try {
-      command = buildServoSweepCommand(channel, angle, seconds);
+      command = buildServoSweepCommand(channel, angle1, seconds1, angle2, seconds2);
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Invalid sweep parameters' };
     }

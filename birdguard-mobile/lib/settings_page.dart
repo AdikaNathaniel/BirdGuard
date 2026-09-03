@@ -5,9 +5,11 @@ import 'package:flutter/material.dart';
 import 'services/api_client.dart';
 
 /// Lets the user configure and control the pan servo's field-of-view sweep:
-/// how wide an angle it oscillates across, and how long it holds each side
-/// before reversing. Talks to the same start/stop/status pattern already
-/// proven by the Detector tab, just against the `/device/servo/*` routes.
+/// a two-step sequence (angle + hold duration for each step) that the
+/// servo cycles between repeatedly -- the app equivalent of typing `recur`
+/// on the Pi and entering two `p<angle>,<seconds>` steps at the prompt.
+/// Talks to the same start/stop/status pattern already proven by the
+/// Detector tab, just against the `/device/servo/*` routes.
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
 
@@ -17,8 +19,10 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   final _formKey = GlobalKey<FormState>();
-  final _angleController = TextEditingController(text: '30');
-  final _secondsController = TextEditingController(text: '0.6');
+  final _angle1Controller = TextEditingController(text: '90');
+  final _seconds1Controller = TextEditingController(text: '0.70');
+  final _angle2Controller = TextEditingController(text: '140');
+  final _seconds2Controller = TextEditingController(text: '0.90');
 
   Timer? _statusTimer;
 
@@ -44,8 +48,10 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   void dispose() {
     _statusTimer?.cancel();
-    _angleController.dispose();
-    _secondsController.dispose();
+    _angle1Controller.dispose();
+    _seconds1Controller.dispose();
+    _angle2Controller.dispose();
+    _seconds2Controller.dispose();
     super.dispose();
   }
 
@@ -81,12 +87,19 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _startSweep() async {
     if (!_formKey.currentState!.validate()) return;
 
-    final angle = double.parse(_angleController.text);
-    final seconds = double.parse(_secondsController.text);
+    final angle1 = double.parse(_angle1Controller.text);
+    final seconds1 = double.parse(_seconds1Controller.text);
+    final angle2 = double.parse(_angle2Controller.text);
+    final seconds2 = double.parse(_seconds2Controller.text);
 
     setState(() => _startInFlight = true);
     try {
-      final result = await ApiClient.instance.startServoSweep(angle: angle, seconds: seconds);
+      final result = await ApiClient.instance.startServoSweep(
+        angle1: angle1,
+        seconds1: seconds1,
+        angle2: angle2,
+        seconds2: seconds2,
+      );
       if (!mounted) return;
       final success = result['success'] != false;
       _showSnackBar(
@@ -207,18 +220,72 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  Widget _buildStep({
+    required String title,
+    required TextEditingController angleController,
+    required TextEditingController secondsController,
+    required String angleHint,
+    required String secondsHint,
+    required bool enabled,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.grey.shade700),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: TextFormField(
+                controller: angleController,
+                enabled: enabled,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                autovalidateMode: AutovalidateMode.onUserInteraction,
+                validator: _validateAngle,
+                decoration: InputDecoration(
+                  labelText: 'Angle (0-180)',
+                  hintText: angleHint,
+                  prefixIcon: const Icon(Icons.rotate_right_outlined),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: TextFormField(
+                controller: secondsController,
+                enabled: enabled,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                autovalidateMode: AutovalidateMode.onUserInteraction,
+                validator: _validateSeconds,
+                decoration: InputDecoration(
+                  labelText: 'Hold (sec)',
+                  hintText: secondsHint,
+                  prefixIcon: const Icon(Icons.timer_outlined),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final bool running = _isRunning == true;
-    // Editing the angle/duration of a sweep already in progress would be
-    // ambiguous (which value does the app apply, and when?) -- so the
-    // fields are locked while a sweep is running; stop it first to change them.
+    // Editing a sweep already in progress would be ambiguous (which value
+    // does the app apply, and when?) -- so the fields are locked while a
+    // sweep is running; stop it first to change them.
     final bool fieldsEnabled = !running && !_startInFlight && !_stopInFlight;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(20),
           child: Form(
             key: _formKey,
@@ -231,34 +298,29 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'The pan servo oscillates between the given angle and its '
-                  'mirror on the other side of center, holding each side for '
-                  'the given duration.',
+                  'The pan servo cycles between two steps -- moving to Step 1\'s '
+                  'angle and holding it, then Step 2\'s angle and holding it, '
+                  'repeating for as long as the sweep runs. For example: Step 1 '
+                  'at 90° for 0.70s, then Step 2 at 140° for 0.90s.',
                   style: TextStyle(fontSize: 12.5, color: Colors.grey.shade600),
                 ),
                 const SizedBox(height: 20),
-                TextFormField(
-                  controller: _angleController,
+                _buildStep(
+                  title: 'Step 1',
+                  angleController: _angle1Controller,
+                  secondsController: _seconds1Controller,
+                  angleHint: 'e.g. 90',
+                  secondsHint: 'e.g. 0.70',
                   enabled: fieldsEnabled,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  autovalidateMode: AutovalidateMode.onUserInteraction,
-                  validator: _validateAngle,
-                  decoration: const InputDecoration(
-                    labelText: 'Field of View (degrees, 0-180)',
-                    prefixIcon: Icon(Icons.rotate_right_outlined),
-                  ),
                 ),
-                const SizedBox(height: 16),
-                TextFormField(
-                  controller: _secondsController,
+                const SizedBox(height: 20),
+                _buildStep(
+                  title: 'Step 2',
+                  angleController: _angle2Controller,
+                  secondsController: _seconds2Controller,
+                  angleHint: 'e.g. 140',
+                  secondsHint: 'e.g. 0.90',
                   enabled: fieldsEnabled,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  autovalidateMode: AutovalidateMode.onUserInteraction,
-                  validator: _validateSeconds,
-                  decoration: const InputDecoration(
-                    labelText: 'Hold Duration (seconds, 0.05-5)',
-                    prefixIcon: Icon(Icons.timer_outlined),
-                  ),
                 ),
                 const SizedBox(height: 24),
                 _buildStatusCard(),
