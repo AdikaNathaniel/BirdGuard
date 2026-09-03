@@ -2,11 +2,18 @@
  * Fixed, whitelisted SSH command registry.
  *
  * This is a hard security boundary: DeviceService only ever looks up a command
- * by one of these known keys. No client-supplied string is ever interpolated
+ * by one of these known keys. No client-supplied *string* is ever interpolated
  * into a shell command. Do not add any code path that builds a command from
- * request input - to expose a new device action, add a new named entry here
+ * raw request input - to expose a new device action, add a new named entry here
  * and a matching message pattern / gateway route, following the existing
  * pattern (see device.controller.ts and device.service.ts).
+ *
+ * The one exception is buildServoSweepCommand() below, which accepts numeric
+ * parameters (angle, seconds) from the app's Settings page. This does not
+ * weaken the boundary above: every parameter is strictly validated as a
+ * finite number within a fixed range before being formatted into the
+ * command, so the resulting string can never contain shell metacharacters -
+ * it's still never a raw, attacker-controlled string reaching the shell.
  */
 export const COMMANDS = {
   // `< /dev/null` fully detaches stdin from the SSH session -- without it,
@@ -44,6 +51,55 @@ export const COMMANDS = {
     'pkill -9 -f pi_person_detector_cpu.py || true; sleep 0.3; ' +
     'pgrep -f pi_person_detector_cpu.py >/dev/null 2>&1 && echo STILL_RUNNING || echo STOPPED',
   DETECTOR_STATUS: 'pgrep -f pi_person_detector_cpu.py || true',
+  // Same wait-for-real-death pattern as STOP_DETECTOR above.
+  STOP_SERVO_SWEEP:
+    'pkill -f pi_servo_calibrate.py || true; ' +
+    'for i in $(seq 1 10); do pgrep -f pi_servo_calibrate.py >/dev/null 2>&1 || break; sleep 0.5; done; ' +
+    'pkill -9 -f pi_servo_calibrate.py || true; sleep 0.3; ' +
+    'pgrep -f pi_servo_calibrate.py >/dev/null 2>&1 && echo STILL_RUNNING || echo STOPPED',
+  SERVO_SWEEP_STATUS: 'pgrep -f pi_servo_calibrate.py || true',
 } as const;
 
 export type CommandKey = keyof typeof COMMANDS;
+
+const SERVO_ANGLE_MIN = 0;
+const SERVO_ANGLE_MAX = 180;
+const SERVO_SECONDS_MIN = 0.05;
+const SERVO_SECONDS_MAX = 5;
+const SERVO_CHANNEL_MIN = 0;
+const SERVO_CHANNEL_MAX = 15;
+
+/**
+ * Builds the SSH command that starts a recurring field-of-view sweep via
+ * pi_servo_calibrate.py's non-interactive CLI mode. See the security note
+ * at the top of this file - angle/seconds/channel are the app's Settings
+ * page values, strictly validated as bounded numbers here before ever
+ * touching the command string, so this can't become a shell-injection
+ * vector no matter what the caller passes in.
+ */
+export function buildServoSweepCommand(channel: number, angle: number, seconds: number): string {
+  if (!Number.isInteger(channel) || channel < SERVO_CHANNEL_MIN || channel > SERVO_CHANNEL_MAX) {
+    throw new Error(`channel must be an integer between ${SERVO_CHANNEL_MIN} and ${SERVO_CHANNEL_MAX}`);
+  }
+  if (!Number.isFinite(angle) || angle < SERVO_ANGLE_MIN || angle > SERVO_ANGLE_MAX) {
+    throw new Error(`angle must be a number between ${SERVO_ANGLE_MIN} and ${SERVO_ANGLE_MAX}`);
+  }
+  if (!Number.isFinite(seconds) || seconds < SERVO_SECONDS_MIN || seconds > SERVO_SECONDS_MAX) {
+    throw new Error(`seconds must be a number between ${SERVO_SECONDS_MIN} and ${SERVO_SECONDS_MAX}`);
+  }
+
+  // .toFixed() on an already-validated finite number always produces a
+  // plain decimal digit string - no quoting/escaping needed, and no way
+  // for it to smuggle shell syntax.
+  const safeChannel = channel.toFixed(0);
+  const safeAngle = angle.toFixed(2);
+  const safeSeconds = seconds.toFixed(2);
+
+  return (
+    'cd ~/BirdGuard/pi-driver-motor && source /home/pi/birdguard-env/bin/activate && ' +
+    `nohup python -u pi_servo_calibrate.py --channel ${safeChannel} --angle ${safeAngle} ` +
+    `--seconds ${safeSeconds} > /home/pi/servo_sweep.log 2>&1 < /dev/null & ` +
+    'PID=$!; sleep 1; ' +
+    'if kill -0 $PID 2>/dev/null; then echo "STARTED $PID"; else echo "FAILED"; tail -n 20 /home/pi/servo_sweep.log; fi'
+  );
+}

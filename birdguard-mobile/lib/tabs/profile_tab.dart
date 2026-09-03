@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../login_page.dart';
 import '../services/auth_storage.dart';
+import '../settings_page.dart';
 
 class ProfileTab extends StatefulWidget {
   const ProfileTab({super.key});
@@ -77,7 +78,18 @@ class _ProfileTabState extends State<ProfileTab> {
             : Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.topRight,
+                    child: IconButton(
+                      icon: Icon(Icons.settings_outlined, color: Colors.grey.shade700),
+                      tooltip: 'Settings',
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => const SettingsPage()),
+                        );
+                      },
+                    ),
+                  ),
                   Center(
                     child: Container(
                       width: 90,

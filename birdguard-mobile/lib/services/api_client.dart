@@ -144,6 +144,47 @@ class ApiClient {
     return _handle(response);
   }
 
+  /// POST /device/servo/start (Bearer token)
+  /// body: { angle, seconds, channel? } -> { success, output }
+  /// Starts the field-of-view sweep: the servo oscillates between [angle]
+  /// and its mirror on the other side of center, holding each side for
+  /// [seconds], until stopped. [channel] defaults to 0 (pan) server-side
+  /// if omitted.
+  Future<Map<String, dynamic>> startServoSweep({
+    required double angle,
+    required double seconds,
+    int? channel,
+  }) async {
+    final response = await _client.post(
+      _uri('/device/servo/start'),
+      headers: await _headers(auth: true),
+      body: jsonEncode({
+        'angle': angle,
+        'seconds': seconds,
+        if (channel != null) 'channel': channel,
+      }),
+    );
+    return _handle(response);
+  }
+
+  /// POST /device/servo/stop (Bearer token) -> { success, output }
+  Future<Map<String, dynamic>> stopServoSweep() async {
+    final response = await _client.post(
+      _uri('/device/servo/stop'),
+      headers: await _headers(auth: true),
+    );
+    return _handle(response);
+  }
+
+  /// GET /device/servo/status (Bearer token) -> { running, pid? }
+  Future<Map<String, dynamic>> getServoSweepStatus() async {
+    final response = await _client.get(
+      _uri('/device/servo/status'),
+      headers: await _headers(auth: true),
+    );
+    return _handle(response);
+  }
+
   /// GET /detections (Bearer token) -> { success, detections: [...] }
   /// [before] (ISO date string) fetches detections older than that
   /// timestamp, for paginating further back in history.

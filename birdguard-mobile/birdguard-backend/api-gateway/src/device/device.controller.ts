@@ -1,7 +1,8 @@
-import { Controller, Get, Inject, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Post, UseGuards } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { StartServoSweepDto } from './dto/start-servo-sweep.dto';
 
 // Requires a valid JWT -- every route here just forwards to device-service,
 // which holds the Pi's SSH credentials and is the only place a raw
@@ -25,5 +26,23 @@ export class DeviceController {
   @Get('detector/status')
   async getDetectorStatus() {
     return firstValueFrom(this.deviceClient.send({ cmd: 'getDetectorStatus' }, {}));
+  }
+
+  // Settings page: field-of-view sweep. `dto` is already validated by the
+  // global ValidationPipe (main.ts) against StartServoSweepDto's bounds
+  // before this method ever runs.
+  @Post('servo/start')
+  async startServoSweep(@Body() dto: StartServoSweepDto) {
+    return firstValueFrom(this.deviceClient.send({ cmd: 'startServoSweep' }, dto));
+  }
+
+  @Post('servo/stop')
+  async stopServoSweep() {
+    return firstValueFrom(this.deviceClient.send({ cmd: 'stopServoSweep' }, {}));
+  }
+
+  @Get('servo/status')
+  async getServoSweepStatus() {
+    return firstValueFrom(this.deviceClient.send({ cmd: 'getServoSweepStatus' }, {}));
   }
 }

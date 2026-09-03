@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NodeSSH } from 'node-ssh';
-import { COMMANDS, CommandKey } from './commands';
+import { buildServoSweepCommand, COMMANDS, CommandKey } from './commands';
 
 export interface CommandResult {
   success: boolean;
@@ -28,7 +28,17 @@ export class DeviceService {
    * caller - only a key of COMMANDS.
    */
   private async runCommand(key: CommandKey): Promise<CommandResult> {
-    const command = COMMANDS[key];
+    return this.execOnPi(COMMANDS[key], key);
+  }
+
+  /**
+   * Shared SSH connect/exec/disconnect logic behind both runCommand() (the
+   * static registry) and the servo-sweep methods below (a validated,
+   * dynamically-built command - see the security note in commands.ts).
+   * Not exposed outside this class: nothing else can reach the Pi except
+   * through the methods already defined on this service.
+   */
+  private async execOnPi(command: string, label: string): Promise<CommandResult> {
     const ssh = new NodeSSH();
     const execTimeoutMs = Number(this.configService.get('PI_SSH_EXEC_TIMEOUT_MS') ?? 15000);
 
@@ -43,7 +53,7 @@ export class DeviceService {
       ]);
 
       if (result.code !== 0 && result.code !== null) {
-        this.logger.warn(`Command ${key} exited with code ${result.code}: ${result.stderr}`);
+        this.logger.warn(`Command ${label} exited with code ${result.code}: ${result.stderr}`);
       }
 
       return {
@@ -52,7 +62,7 @@ export class DeviceService {
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown SSH error';
-      this.logger.error(`Failed to run command ${key}: ${message}`);
+      this.logger.error(`Failed to run command ${label}: ${message}`);
       return { success: false, error: message };
     } finally {
       ssh.dispose();
@@ -121,6 +131,69 @@ export class DeviceService {
 
   async getDetectorStatus(): Promise<DetectorStatusResult> {
     const result = await this.runCommand('DETECTOR_STATUS');
+
+    if (!result.success) {
+      return { success: false, error: result.error };
+    }
+
+    const pid = (result.output ?? '').split('\n')[0]?.trim();
+    const running = Boolean(pid);
+
+    return running ? { success: true, running: true, pid } : { success: true, running: false };
+  }
+
+  /**
+   * Starts the field-of-view sweep (pi_servo_calibrate.py's recurring
+   * oscillation) at the given angle/duration - the Settings page's
+   * "start" action. Defaults to channel 0 (pan), matching the
+   * "field of view" framing: a horizontal sweep, not tilt.
+   */
+  async startServoSweep(angle: number, seconds: number, channel = 0): Promise<CommandResult> {
+    let command: string;
+    try {
+      command = buildServoSweepCommand(channel, angle, seconds);
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Invalid sweep parameters' };
+    }
+
+    const result = await this.execOnPi(command, 'START_SERVO_SWEEP');
+    if (result.success) {
+      const output = result.output ?? '';
+      if (output.startsWith('STARTED')) {
+        return { success: true, output };
+      }
+      return { success: false, error: output || 'Servo sweep process exited immediately after launch' };
+    }
+
+    // Same reasoning as startDetector(): an exec timeout doesn't
+    // necessarily mean the nohup'd process never launched - verify with
+    // an independent status check before reporting a false failure.
+    const status = await this.getServoSweepStatus();
+    if (status.success && status.running) {
+      return { success: true, output: `STARTED ${status.pid ?? ''}`.trim() };
+    }
+    return result;
+  }
+
+  async stopServoSweep(): Promise<CommandResult> {
+    const result = await this.runCommand('STOP_SERVO_SWEEP');
+    if (result.success) {
+      const output = result.output ?? '';
+      if (output.includes('STILL_RUNNING')) {
+        return { success: false, error: 'Servo sweep did not stop within the timeout' };
+      }
+      return { success: true, output };
+    }
+
+    const status = await this.getServoSweepStatus();
+    if (status.success && !status.running) {
+      return { success: true, output: 'STOPPED' };
+    }
+    return result;
+  }
+
+  async getServoSweepStatus(): Promise<DetectorStatusResult> {
+    const result = await this.runCommand('SERVO_SWEEP_STATUS');
 
     if (!result.success) {
       return { success: false, error: result.error };
