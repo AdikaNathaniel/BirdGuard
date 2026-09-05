@@ -194,8 +194,13 @@ python pi_driver_motor.py
 Prompts for a channel, then accepts: `<number>` (set angle and hold),
 `p<number>` (pulse for a default duration then auto-release),
 `p<number>,<seconds>` (pulse for an exact duration, e.g. `p180,1.77`),
-`t<number>` (send the angle and time how long until you press Enter at
-the target position), `r` (release now), `q` (quit).
+`pr<number>,<seconds>` (recurring: alternates between that angle and its
+mirror on the other side of center until Ctrl+C, e.g. `pr90,0.61`),
+`recur` (recurring sequence: enter your own list of `p<angle>,<seconds>`
+steps, e.g. `p90,0.70` then `p140,0.90`, then it cycles through them
+forever until you type `r`), `t<number>` (send the angle and time how
+long until you press Enter at the target position), `r` (release now),
+`q` (quit).
 ```bash
 cd ~/BirdGuard/pi-driver-motor
 source ~/birdguard-env/bin/activate
@@ -348,6 +353,35 @@ flyctl machine restart <machine-id>
 ```bash
 flyctl machine stop <machine-id>
 flyctl machine start <machine-id>
+```
+
+---
+
+## Web Dashboard (Next.js, `birdguard-mobile/web-dashboard/`)
+
+Browser-based mirror of the mobile app's dashboard (Camera Feed, Detector,
+Logs, Profile, Settings/servo sweep) -- same api-gateway backend, same JWT
+login, just a left-sidebar layout instead of a bottom nav bar. Auth is
+client-side (JWT in `localStorage`); there's no separate backend for this.
+
+### Run the web dashboard locally
+```bash
+cd birdguard-mobile/web-dashboard
+npm install
+npm run dev
+```
+Then open http://localhost:3000.
+
+### Build for production / verify it compiles cleanly
+```bash
+cd birdguard-mobile/web-dashboard
+npm run build
+```
+
+### Lint
+```bash
+cd birdguard-mobile/web-dashboard
+npm run lint
 ```
 
 ---

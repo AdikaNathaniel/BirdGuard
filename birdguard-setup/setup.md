@@ -4,16 +4,57 @@ Run these in order.
 
 ---
 
-## 1. SSH into the Pi
+## 1. Find the Pi's IP address on the network
 
+The Pi's IP is DHCP-assigned and changes depending on which network it's
+on, so this is where a new user (or a new network) should always start --
+any IP shown as an example anywhere in this guide is just from one
+specific session, not a fixed address.
+
+First, make sure `nmap` is installed on your own PC (not the Pi):
+
+**Option A: winget**
 ```bash
-ssh pi@192.168.43.233
+winget install nmap
 ```
 
-You'll be prompted for a password -- it's `birdguard`.
+**Option B: Chocolatey (if you have it installed)**
+```bash
+choco install nmap
+```
 
-(IP is DHCP-assigned and can change -- confirm with `hostname -I` on the Pi
-or the hotspot's connected-devices list if this address doesn't respond.)
+**Option C: Manual download**
+If neither package manager is available, download the installer directly
+from the official site: https://nmap.org/download.html
+
+Once `nmap` is installed, scan your local network for live devices
+(adjust the subnet if your router uses something other than
+`192.168.0.x` -- check your PC's own IP to confirm):
+
+```bash
+nmap -sn 192.168.0.0/24
+```
+
+This lists every responding device's IP and MAC address, but not which
+one is the Pi by name. To identify it, open your router's admin panel
+(e.g. `http://192.168.0.1/index.html#entry`, exact path varies by
+router) and look at its connected-devices list for the entry named
+`BirdGuard` (or similar) -- note its MAC address there, then match that
+MAC address against the `nmap` scan output to find its current IP.
+
+Once you have that IP, SSH in with it:
+
+```bash
+ssh pi@192.168.0.101
+```
+
+(where `192.168.0.101` is only an example -- substitute the real IP you
+just found). You'll be prompted for a password -- it's `birdguard`.
+
+If the Pi later drops off this address (new network, router reassigned a
+different DHCP lease, etc.), re-run the `nmap` scan above rather than
+assuming the old IP still works -- `hostname -I` on the Pi itself or the
+router's connected-devices list both confirm the current address too.
 
 ---
 
