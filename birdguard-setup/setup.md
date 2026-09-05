@@ -35,6 +35,16 @@ Once `nmap` is installed, scan your local network for live devices
 nmap -sn 192.168.0.0/24
 ```
 
+If this fails with `'nmap' is not recognized as an internal or external
+command, operable program or batch file` even after installing it (common
+right after a fresh install, before your terminal's PATH picks up the new
+entry), run it with the full path directly instead. Nmap usually installs
+to:
+
+```bash
+"C:\Program Files (x86)\Nmap\nmap.exe" -sn 192.168.0.0/24
+```
+
 This lists every responding device's IP and MAC address, but not which
 one is the Pi by name. To identify it, open your router's admin panel
 (e.g. `http://192.168.0.1/index.html#entry`, exact path varies by
