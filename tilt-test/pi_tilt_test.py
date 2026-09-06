@@ -50,9 +50,13 @@ def main():
             cmd = input("> ").strip().lower()
 
             if cmd == 'up':
-                move_to(current_angle + STEP_DEGREES)
-            elif cmd == 'down':
+                # Inverted relative to raw angle: for how this servo is
+                # mounted, a *decreasing* angle is what physically tilts it
+                # up (confirmed by testing -- increasing angle physically
+                # moved it down instead).
                 move_to(current_angle - STEP_DEGREES)
+            elif cmd == 'down':
+                move_to(current_angle + STEP_DEGREES)
             elif cmd == 'c':
                 move_to(CENTER_ANGLE)
             elif cmd == 's':
