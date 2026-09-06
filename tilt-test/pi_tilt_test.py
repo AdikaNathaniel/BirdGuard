@@ -12,23 +12,23 @@ from adafruit_servokit import ServoKit
 TILT_CHANNEL = 0
 
 CENTER_ANGLE = 90
-STEP_DEGREES = 10   # degrees moved per up/down command
+# Fixed target angles, not step increments -- one 'up' or 'down' command
+# jumps straight to the matching angle below, rather than stepping there
+# gradually across several commands. Inverted relative to raw angle for
+# how this servo is mounted: confirmed by testing that a *lower* angle
+# (110) physically tilts it up, and a *higher* angle (140) physically
+# tilts it down.
+UP_ANGLE = 110
+DOWN_ANGLE = 140
 MIN_ANGLE = 0
 MAX_ANGLE = 180
 
 kit = ServoKit(channels=16)
 
-# Tracked separately from the servo's own state since a released servo
-# (angle = None) doesn't report an angle back -- this is the single source
-# of truth for "where up/down should move to next".
-current_angle = CENTER_ANGLE
-
 
 def move_to(angle):
-    global current_angle
     # Clamped to the servo's full physical range as a hard safety limit.
     angle = max(MIN_ANGLE, min(MAX_ANGLE, angle))
-    current_angle = angle
     kit.servo[TILT_CHANNEL].angle = angle
     print(f"Tilt angle set to: {angle}")
 
@@ -41,7 +41,10 @@ def stop():
 def main():
     print("--- Pi -> PCA9685 Tilt Test (I2C) ---")
     print(f"Channel {TILT_CHANNEL}, starting centered at {CENTER_ANGLE} degrees")
-    print("'up' to tilt up, 'down' to tilt down, 'c' to re-center, 's' to release. Ctrl+C to quit.")
+    print(
+        f"'up' moves straight to {UP_ANGLE}, 'down' moves straight to {DOWN_ANGLE}, "
+        "'c' re-centers, 's' releases. Ctrl+C to quit."
+    )
 
     move_to(CENTER_ANGLE)
 
@@ -50,13 +53,9 @@ def main():
             cmd = input("> ").strip().lower()
 
             if cmd == 'up':
-                # Inverted relative to raw angle: for how this servo is
-                # mounted, a *decreasing* angle is what physically tilts it
-                # up (confirmed by testing -- increasing angle physically
-                # moved it down instead).
-                move_to(current_angle - STEP_DEGREES)
+                move_to(UP_ANGLE)
             elif cmd == 'down':
-                move_to(current_angle + STEP_DEGREES)
+                move_to(DOWN_ANGLE)
             elif cmd == 'c':
                 move_to(CENTER_ANGLE)
             elif cmd == 's':
