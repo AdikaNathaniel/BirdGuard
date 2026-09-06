@@ -207,6 +207,17 @@ source ~/birdguard-env/bin/activate
 python pi_servo_calibrate.py
 ```
 
+### Run the tilt test (single servo, up/down on channel 0)
+Simple up/down test for one tilt servo wired to PCA9685 channel 0 (signal
+= yellow/orange, V+ = red, GND = brown/black). Starts centered at 90
+degrees; `up`/`down` step by 10 degrees each, `c` re-centers, `s`
+releases the signal, Ctrl+C quits (also releases on the way out).
+```bash
+cd ~/BirdGuard/tilt-test
+source ~/birdguard-env/bin/activate
+python pi_tilt_test.py
+```
+
 ### Emergency-release a stuck/spinning servo
 Use when a servo (pan channel 0, tilt channel 4) is still moving/spinning
 and won't stop on its own -- e.g. after killing a detector script that
