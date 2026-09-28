@@ -17,6 +17,13 @@ from pymongo import MongoClient
 # the camera/recording settings. Kept together at the top so none of this
 # needs hunting through the rest of the file to adjust.
 LASER_GPIO = 12               # Pi GPIO12 -> Nano D2 -> Nano D6 -> laser
+POWER_RELAY_GPIO = 17         # Pi GPIO17 -> 2-channel relay IN1 -> laser PSU positive wire.
+                               # Cuts the laser's power supply entirely (not just the trigger
+                               # signal) whenever no person is being detected, for energy
+                               # saving and as a true hardware-level off between detections
+                               # rather than just holding the Nano's trigger line low. Follows
+                               # the exact same on/off timing as LASER_GPIO below -- both are
+                               # driven together at every transition, never independently.
 UDP_IP = "127.0.0.1"
 UDP_PORT = 5005
 TARGET_CLASS = "person"
@@ -51,16 +58,25 @@ VIDEO_PATH = f"{SESSION_DIR}/recording.avi"
 os.makedirs(DETECTIONS_DIR, exist_ok=True)
 
 
-def set_laser_gpio(high: bool):
-    # Drives GPIO12 via the `pinctrl` CLI tool rather than a Python GPIO
-    # library -- this signal is read by the Arduino Nano (D2), not used
-    # to power the laser directly from the Pi. `dh`/`dl` = "digital high"
-    # / "digital low" in pinctrl's own syntax.
+def set_gpio(pin: int, high: bool):
+    # Drives a pin via the `pinctrl` CLI tool rather than a Python GPIO
+    # library. `dh`/`dl` = "digital high" / "digital low" in pinctrl's own
+    # syntax. Shared by both LASER_GPIO (read by the Arduino Nano, D2) and
+    # POWER_RELAY_GPIO (drives the relay module directly) -- same call,
+    # different pin number.
     state = "dh" if high else "dl"
     try:
-        subprocess.run(["pinctrl", "set", str(LASER_GPIO), "op", state], check=True)
+        subprocess.run(["pinctrl", "set", str(pin), "op", state], check=True)
     except Exception as e:
-        print(f"pinctrl call failed: {e}")
+        print(f"pinctrl call failed (GPIO{pin}): {e}")
+
+
+def set_laser_power(high: bool):
+    # Toggles the laser's trigger signal and its power-relay together --
+    # every call site in this file wants both at once, so callers never
+    # have to remember to drive both pins themselves.
+    set_gpio(LASER_GPIO, high)
+    set_gpio(POWER_RELAY_GPIO, high)
 
 
 # --- DETECTION LOGGING (writes directly to MongoDB; the backend's
@@ -164,8 +180,9 @@ def main():
     print(f"Target: {TARGET_CLASS.upper()} | Confidence: {CONFIDENCE_THRESHOLD}")
     print(f"Video: {VIDEO_PATH}")
     print(f"Laser trigger: GPIO{LASER_GPIO} -> Nano D2 -> Nano D6 -> laser")
+    print(f"Power relay: GPIO{POWER_RELAY_GPIO} -> relay IN1 -> laser PSU")
 
-    set_laser_gpio(False)  # laser OFF at startup
+    set_laser_power(False)  # laser + relay OFF at startup
 
     # UDP socket for broadcasting each detection's bounding box to any
     # local listener (e.g. a future pan/tilt tracking process) -- fire
@@ -250,15 +267,18 @@ def main():
                     }
                     sock.sendto(json.dumps(payload).encode(), (UDP_IP, UDP_PORT))
 
-            # --- LASER CONTROL (Pi GPIO12 -> Nano D2 -> Nano D6 -> laser) ---
-            # Edge-triggered, not level-triggered: the laser turns on once
-            # when a person first appears, and off only after they've been
-            # gone for LASER_OFF_DELAY seconds (debounced so brief gaps in
-            # detection between frames don't flicker the laser on/off).
+            # --- LASER + POWER RELAY CONTROL ---
+            # (Pi GPIO12 -> Nano D2 -> Nano D6 -> laser trigger,
+            #  Pi GPIO17 -> relay IN1 -> laser PSU positive -> laser power)
+            # Edge-triggered, not level-triggered: both turn on once when a
+            # person first appears, and off only after they've been gone
+            # for LASER_OFF_DELAY seconds (debounced so brief gaps in
+            # detection between frames don't flicker on/off, which would
+            # also chatter the relay's mechanical contacts needlessly).
             if target_found and not laser_on:
-                set_laser_gpio(True)
+                set_laser_power(True)
                 laser_on = True
-                print(">>> LASER ON")
+                print(">>> LASER ON (relay powered)")
 
                 # Log this as one detection event (not per-frame) -- use
                 # the highest-confidence detection in this frame.
@@ -268,9 +288,9 @@ def main():
 
             elif not target_found and laser_on:
                 if time.time() - last_detection_time > LASER_OFF_DELAY:
-                    set_laser_gpio(False)
+                    set_laser_power(False)
                     laser_on = False
-                    print(">>> LASER OFF")
+                    print(">>> LASER OFF (relay unpowered)")
 
             # --- VIDEO RECORDING ---
             # Every frame gets written to the session's video file
@@ -306,11 +326,12 @@ def main():
         print(f"\n\nStopped. {frame_count} frames | {detection_count} detections")
         print(f"Video saved: {VIDEO_PATH}")
     finally:
-        # Always leave the laser off and release hardware/file handles
-        # cleanly, however the loop above exited.
+        # Always leave the laser and relay off and release hardware/file
+        # handles cleanly, however the loop above exited -- including a
+        # crash, so the relay can't be left stuck powering the laser.
         if laser_on:
-            set_laser_gpio(False)
-            print("Laser OFF (cleanup)")
+            set_laser_power(False)
+            print("Laser + relay OFF (cleanup)")
         writer.release()
         picam2.stop()
         cv2.destroyAllWindows()
