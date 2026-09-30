@@ -3,12 +3,14 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 import time
 import cv2
-from config.settings import (CAMERA_RESOLUTION, FRAME_RATE, MODEL_PATH,
+from config.settings import (CAMERA_RESOLUTION, FRAME_RATE, CAMERA_ROTATION,
+                             CAMERA_SATURATION, CAMERA_BRIGHTNESS, MODEL_PATH,
                              CONFIDENCE, TARGET_CLASS, INFERENCE_SIZE)
 from src.hardware.camera import Camera
 from src.detection.detector import PersonDetector
 
-cam = Camera(CAMERA_RESOLUTION, FRAME_RATE)
+cam = Camera(CAMERA_RESOLUTION, FRAME_RATE, CAMERA_ROTATION,
+                 CAMERA_SATURATION, CAMERA_BRIGHTNESS)
 detector = PersonDetector(MODEL_PATH, CONFIDENCE, TARGET_CLASS, INFERENCE_SIZE)
 prev = time.time()
 try:

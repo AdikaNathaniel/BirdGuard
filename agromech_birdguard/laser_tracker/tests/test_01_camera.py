@@ -3,10 +3,12 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 import time
 import cv2
-from config.settings import CAMERA_RESOLUTION, FRAME_RATE
+from config.settings import (CAMERA_RESOLUTION, FRAME_RATE, CAMERA_ROTATION,
+                             CAMERA_SATURATION, CAMERA_BRIGHTNESS)
 from src.hardware.camera import Camera
 
-cam = Camera(CAMERA_RESOLUTION, FRAME_RATE)
+cam = Camera(CAMERA_RESOLUTION, FRAME_RATE, CAMERA_ROTATION,
+                 CAMERA_SATURATION, CAMERA_BRIGHTNESS)
 prev = time.time()
 try:
     while True:
@@ -14,7 +16,7 @@ try:
         if not ok:
             break
         fps = 1.0 / max(time.time() - prev, 1e-6)
-        
+
         prev = time.time()
         cv2.putText(frame, f"FPS: {fps:.1f}", (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)

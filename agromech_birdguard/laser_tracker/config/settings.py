@@ -7,7 +7,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # ---------- Camera ----------
 FRAME_RATE = 15                 # target capture frame rate (FPS)
-CAMERA_RESOLUTION = (1280, 720)
+CAMERA_RESOLUTION = (1280, 720)  # final frame size (width, height), after rotation
+CAMERA_ROTATION = 270           # clockwise degrees: 0, 90, 180 or 270
+CAMERA_SATURATION = 1.5         # colour strength: 0 = greyscale, 1 = normal
+CAMERA_BRIGHTNESS = 0.2         # -1.0 (dark) .. 1.0 (bright), 0 = normal
 
 # ---------- Model ----------
 # Set absolute path for the model

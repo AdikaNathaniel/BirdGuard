@@ -3,7 +3,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import time
 import cv2
-from config.settings import (CAMERA_RESOLUTION, FRAME_RATE, MODEL_PATH,
+from config.settings import (CAMERA_RESOLUTION, FRAME_RATE, CAMERA_ROTATION,
+                             CAMERA_SATURATION, CAMERA_BRIGHTNESS, MODEL_PATH,
                              CONFIDENCE, TARGET_CLASS, INFERENCE_SIZE,
                              PCA9685_I2C_ADDRESS, PWM_FREQUENCY_HZ,
                              SERVO_MIN_US, SERVO_MAX_US,
@@ -21,7 +22,8 @@ from src.tracking.tracker import LaserTracker
 
 
 def run():
-    cam = Camera(CAMERA_RESOLUTION, FRAME_RATE)
+    cam = Camera(CAMERA_RESOLUTION, FRAME_RATE, CAMERA_ROTATION,
+                 CAMERA_SATURATION, CAMERA_BRIGHTNESS)
     detector = PersonDetector(MODEL_PATH, CONFIDENCE, TARGET_CLASS, INFERENCE_SIZE)
     pwm = PWMController(PCA9685_I2C_ADDRESS, frequency_hz=PWM_FREQUENCY_HZ,
                         servo_min_us=SERVO_MIN_US, servo_max_us=SERVO_MAX_US)
