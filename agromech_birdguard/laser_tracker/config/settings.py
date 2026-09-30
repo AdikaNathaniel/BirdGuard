@@ -38,6 +38,8 @@ LASER_ACTIVE_HIGH = True
 RELAY_GPIO_PIN = 17             # BCM numbering, relay IN1 -> laser PSU positive
 RELAY_ACTIVE_HIGH = True        # set False if the relay clicks on when the pin is LOW
 RELAY_SETTLE_S = 0.1            # wait after powering the relay before triggering the laser
+LASER_OFF_DELAY_S = 3.0         # keep laser on this long after the target was last seen
+                                # (stops the relay clicking when detection flickers)
 
 # ---------- Tracking ----------
 TRACK_GAIN = 30.0               # deg correction per unit normalized error

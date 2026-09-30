@@ -13,7 +13,8 @@ from config.settings import (CAMERA_RESOLUTION, FRAME_RATE, CAMERA_ROTATION,
                              TILT_MIN_DEG, TILT_MAX_DEG,
                              PAN_START_DEG, TILT_START_DEG,
                              LASER_GPIO_PIN, LASER_ACTIVE_HIGH,
-                             TRACK_GAIN, DEAD_ZONE)
+                             RELAY_GPIO_PIN, RELAY_ACTIVE_HIGH, RELAY_SETTLE_S,
+                             LASER_OFF_DELAY_S, TRACK_GAIN, DEAD_ZONE)
 from src.hardware.camera import Camera
 from src.detection.detector import PersonDetector
 from src.hardware.pwm import PWMController
@@ -22,17 +23,20 @@ from src.tracking.tracker import LaserTracker
 
 
 def run():
+    # Laser first, so it is held OFF while the camera and model load
+    laser = Laser(LASER_GPIO_PIN, LASER_ACTIVE_HIGH,
+                  RELAY_GPIO_PIN, RELAY_ACTIVE_HIGH, RELAY_SETTLE_S)
     cam = Camera(CAMERA_RESOLUTION, FRAME_RATE, CAMERA_ROTATION,
                  CAMERA_SATURATION, CAMERA_BRIGHTNESS)
     detector = PersonDetector(MODEL_PATH, CONFIDENCE, TARGET_CLASS, INFERENCE_SIZE)
     pwm = PWMController(PCA9685_I2C_ADDRESS, frequency_hz=PWM_FREQUENCY_HZ,
                         servo_min_us=SERVO_MIN_US, servo_max_us=SERVO_MAX_US)
-    laser = Laser(LASER_GPIO_PIN, LASER_ACTIVE_HIGH)
     tracker = LaserTracker(pwm, PAN_CHANNEL, TILT_CHANNEL,
                            pan_start=PAN_START_DEG, tilt_start=TILT_START_DEG,
                            pan_limits=(PAN_MIN_DEG, PAN_MAX_DEG),
                            tilt_limits=(TILT_MIN_DEG, TILT_MAX_DEG),
                            gain=TRACK_GAIN, dead_zone=DEAD_ZONE)
+    last_seen = 0.0
     prev = time.time()
     try:
         while True:
@@ -45,8 +49,9 @@ def run():
                 x1, y1, x2, y2 = det["bbox"]
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                 tracker.update(det["bbox"], frame.shape[1], frame.shape[0])
+                last_seen = time.time()
                 laser.on()
-            else:
+            elif laser.is_on and time.time() - last_seen > LASER_OFF_DELAY_S:
                 laser.off()
             fps = 1.0 / max(time.time() - prev, 1e-6)
             prev = time.time()
@@ -56,7 +61,7 @@ def run():
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
     finally:
-        laser.off()
+        laser.close()
         pwm.release()
         cam.release()
         cv2.destroyAllWindows()
