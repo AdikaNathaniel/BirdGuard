@@ -33,8 +33,11 @@ PAN_START_DEG = 90
 TILT_START_DEG = 90
 
 # ---------- Laser ----------
-LASER_GPIO_PIN = 18             # BCM numbering, drives MOSFET gate
+LASER_GPIO_PIN = 12             # BCM numbering: Pi GPIO12 -> Nano D2 -> Nano D6 -> laser PWM
 LASER_ACTIVE_HIGH = True
+RELAY_GPIO_PIN = 17             # BCM numbering, relay IN1 -> laser PSU positive
+RELAY_ACTIVE_HIGH = True        # set False if the relay clicks on when the pin is LOW
+RELAY_SETTLE_S = 0.1            # wait after powering the relay before triggering the laser
 
 # ---------- Tracking ----------
 TRACK_GAIN = 30.0               # deg correction per unit normalized error
