@@ -2,6 +2,7 @@ import time
 import json
 import socket
 import os
+import signal
 import subprocess
 import threading
 import cv2
@@ -10,6 +11,18 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from picamera2 import Picamera2
 from ultralytics import YOLO
 from pymongo import MongoClient
+from adafruit_servokit import ServoKit
+
+# Python only auto-converts SIGINT (Ctrl+C) into a catchable KeyboardInterrupt
+# -- SIGTERM (what `pkill`/the backend's STOP_DETECTOR command sends) kills
+# the process immediately by default, skipping the try/finally cleanup below.
+# Route it through the same path so the laser always gets switched off and
+# the servos always get re-centered/released on stop, not just on Ctrl+C.
+def _handle_sigterm(signum, frame):
+    raise KeyboardInterrupt
+
+
+signal.signal(signal.SIGTERM, _handle_sigterm)
 
 # --- CONFIG ---
 # Central tunables for the whole script: which GPIO fires the laser, where
@@ -29,10 +42,33 @@ UDP_PORT = 5005
 TARGET_CLASS = "person"
 CONFIDENCE_THRESHOLD = 0.5
 LASER_OFF_DELAY = 3.0         # Seconds to keep laser on after last detection
-FRAME_WIDTH = 1280
+FRAME_WIDTH = 1280            # final frame size, after rotation
 FRAME_HEIGHT = 720
 VIDEO_FPS = 30
 PREVIEW_PORT = 8080           # browse http://<pi-ip>:8080/ for a live MJPEG preview
+
+# --- CAMERA ORIENTATION + COLOUR ---
+# The camera is mounted on its side. For 90/270 the sensor is read as a tall
+# centre strip and then turned upright, so the frame is still a full-quality
+# FRAME_WIDTH x FRAME_HEIGHT landscape picture rather than a narrow portrait.
+CAMERA_ROTATION = 270         # clockwise degrees: 0, 90, 180 or 270
+CAMERA_SATURATION = 1.5       # colour strength: 0 = greyscale, 1 = normal
+CAMERA_BRIGHTNESS = 0.2       # -1.0 (dark) .. 1.0 (bright), 0 = normal
+
+# --- PAN/TILT TRACKING (PCA9685 over I2C) ---
+# Values from agromech_birdguard/laser_tracker/config/settings.py, verified
+# there with the servo sweep / manual servo / tracking tests.
+PCA9685_I2C_ADDRESS = 0x40
+PAN_CHANNEL = 2
+TILT_CHANNEL = 3
+SERVO_MIN_US = 500            # pulse width at 0 deg
+SERVO_MAX_US = 2500           # pulse width at 180 deg
+PAN_MIN_DEG, PAN_MAX_DEG = 0, 180
+TILT_MIN_DEG, TILT_MAX_DEG = 40, 140   # keeps laser pointed at backdrop
+PAN_START_DEG = 90
+TILT_START_DEG = 90
+TRACK_GAIN = 30.0             # deg correction per unit normalized error
+DEAD_ZONE = 0.05              # ignore error within 5% of frame center
 
 # Same Atlas cluster/database the NestJS backend uses -- the Pi writes
 # detection events directly, the backend's detection-service only reads.
@@ -77,6 +113,79 @@ def set_laser_power(high: bool):
     # have to remember to drive both pins themselves.
     set_gpio(LASER_GPIO, high)
     set_gpio(POWER_RELAY_GPIO, high)
+
+
+# --- CAMERA ROTATION ---
+# Clockwise rotation in degrees -> OpenCV rotate code
+_ROTATE_CODES = {
+    90: cv2.ROTATE_90_CLOCKWISE,
+    180: cv2.ROTATE_180,
+    270: cv2.ROTATE_90_COUNTERCLOCKWISE,
+}
+
+
+def centre_crop(picam2, size):
+    # Largest centred sensor area with the same shape as `size`, so the
+    # sideways (tall) capture is cropped rather than squashed/stretched.
+    max_x, max_y, max_w, max_h = picam2.camera_controls["ScalerCrop"][1]
+    aspect = size[0] / size[1]
+    crop_w, crop_h = max_w, max_h
+    if max_w / max_h > aspect:
+        crop_w = int(max_h * aspect)
+    else:
+        crop_h = int(max_w / aspect)
+    return (max_x + (max_w - crop_w) // 2, max_y + (max_h - crop_h) // 2,
+            crop_w, crop_h)
+
+
+def rotate_frame(frame):
+    if CAMERA_ROTATION in _ROTATE_CODES:
+        return cv2.rotate(frame, _ROTATE_CODES[CAMERA_ROTATION])
+    return frame
+
+
+# --- PAN/TILT TRACKING ---
+class PanTiltTracker:
+    """Proportional pan/tilt control that steers the target bbox to frame centre.
+
+    The PCA9685 gives no position feedback, so `pan`/`tilt` are the last
+    commanded angles -- the only record of where the servos are.
+    """
+
+    def __init__(self):
+        self.kit = ServoKit(channels=16, address=PCA9685_I2C_ADDRESS)
+        for ch in (PAN_CHANNEL, TILT_CHANNEL):
+            self.kit.servo[ch].set_pulse_width_range(SERVO_MIN_US, SERVO_MAX_US)
+        self.center()
+
+    def center(self):
+        self.pan = PAN_START_DEG
+        self.tilt = TILT_START_DEG
+        self.kit.servo[PAN_CHANNEL].angle = self.pan
+        self.kit.servo[TILT_CHANNEL].angle = self.tilt
+
+    def update(self, bbox, frame_w, frame_h):
+        x1, y1, x2, y2 = bbox
+        err_x = ((x1 + x2) / 2 - frame_w / 2) / (frame_w / 2)   # -1 .. 1
+        err_y = ((y1 + y2) / 2 - frame_h / 2) / (frame_h / 2)
+
+        # NOTE: if it tracks AWAY from the person, flip the sign of these two lines
+        if abs(err_x) > DEAD_ZONE:
+            self.pan -= err_x * TRACK_GAIN
+        if abs(err_y) > DEAD_ZONE:
+            self.tilt += err_y * TRACK_GAIN
+
+        self.pan = max(PAN_MIN_DEG, min(PAN_MAX_DEG, self.pan))
+        self.tilt = max(TILT_MIN_DEG, min(TILT_MAX_DEG, self.tilt))
+        self.kit.servo[PAN_CHANNEL].angle = self.pan
+        self.kit.servo[TILT_CHANNEL].angle = self.tilt
+
+    def release(self):
+        # Re-center, then stop holding torque
+        self.center()
+        time.sleep(0.5)
+        self.kit.servo[PAN_CHANNEL].angle = None
+        self.kit.servo[TILT_CHANNEL].angle = None
 
 
 # --- DETECTION LOGGING (writes directly to MongoDB; the backend's
@@ -181,8 +290,11 @@ def main():
     print(f"Video: {VIDEO_PATH}")
     print(f"Laser trigger: GPIO{LASER_GPIO} -> Nano D2 -> Nano D6 -> laser")
     print(f"Power relay: GPIO{POWER_RELAY_GPIO} -> relay IN1 -> laser PSU")
+    print(f"Pan/tilt: PCA9685 0x{PCA9685_I2C_ADDRESS:02X} channel {PAN_CHANNEL} (pan) / "
+          f"{TILT_CHANNEL} (tilt) | Camera rotation: {CAMERA_ROTATION} deg")
 
     set_laser_power(False)  # laser + relay OFF at startup
+    tracker = PanTiltTracker()  # servos to start position
 
     # UDP socket for broadcasting each detection's bounding box to any
     # local listener (e.g. a future pan/tilt tracking process) -- fire
@@ -196,15 +308,22 @@ def main():
     print("Model loaded.")
 
     # Init camera at the configured resolution/frame-rate window via
-    # picamera2 (libcamera) -- RGB888 is what OpenCV/YOLO expect.
+    # picamera2 (libcamera) -- "RGB888" is BGR byte order, which is what
+    # OpenCV/YOLO expect. Mounted sideways: ask the sensor for a tall image
+    # so the frame is FRAME_WIDTH x FRAME_HEIGHT once rotated upright.
+    sideways = CAMERA_ROTATION in (90, 270)
+    capture_size = (FRAME_HEIGHT, FRAME_WIDTH) if sideways else (FRAME_WIDTH, FRAME_HEIGHT)
     picam2 = Picamera2()
     config = picam2.create_video_configuration(
-        main={"size": (FRAME_WIDTH, FRAME_HEIGHT), "format": "RGB888"},
+        main={"size": capture_size, "format": "RGB888"},
         controls={"FrameDurationLimits": (33333, 66666)}
     )
     picam2.configure(config)
     picam2.start()
-    picam2.set_controls({"AwbEnable": True, "Saturation": 1.5, "Brightness": 0.2})
+    picam2.set_controls({"ScalerCrop": centre_crop(picam2, capture_size),
+                         "AwbEnable": True,
+                         "Saturation": CAMERA_SATURATION,
+                         "Brightness": CAMERA_BRIGHTNESS})
     time.sleep(2)  # let auto-exposure/auto-white-balance settle before recording starts
 
     # Init video writer — records continuously from the start, not just
@@ -231,7 +350,7 @@ def main():
             # One frame in, one YOLO pass out -- runs synchronously in the
             # main loop since CPU inference is already the bottleneck here;
             # no benefit to a separate inference thread.
-            frame = picam2.capture_array()
+            frame = rotate_frame(picam2.capture_array())
             bgr = frame
 
             results = model.predict(frame, conf=CONFIDENCE_THRESHOLD, verbose=False)[0]
@@ -266,6 +385,13 @@ def main():
                         "bbox": {"x1": x1, "y1": y1, "x2": x2, "y2": y2}
                     }
                     sock.sendto(json.dumps(payload).encode(), (UDP_IP, UDP_PORT))
+
+            # --- PAN/TILT TRACKING (every frame a person is visible) ---
+            # Steer toward the highest-confidence person. With no person in
+            # view the servos simply hold their last position.
+            if detections:
+                tx1, ty1, tx2, ty2, _, _ = max(detections, key=lambda d: d[5])
+                tracker.update((tx1, ty1, tx2, ty2), frame.shape[1], frame.shape[0])
 
             # --- LASER + POWER RELAY CONTROL ---
             # (Pi GPIO12 -> Nano D2 -> Nano D6 -> laser trigger,
@@ -305,6 +431,12 @@ def main():
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
                 cv2.imwrite(f"{DETECTIONS_DIR}/frame_{frame_count:05d}.jpg", video_frame)
                 detection_count += 1
+            # Crosshair = frame centre (where tracking steers the person to)
+            # plus the current commanded servo angles, for checking tracking
+            cv2.drawMarker(video_frame, (FRAME_WIDTH // 2, FRAME_HEIGHT // 2),
+                           (0, 0, 255), cv2.MARKER_CROSS, 30, 2)
+            cv2.putText(video_frame, f"pan {tracker.pan:.0f}  tilt {tracker.tilt:.0f}",
+                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
 
             # Inference doesn't run at a perfectly steady frame rate, so
             # the frame is written `repeats` times (based on real elapsed
@@ -332,6 +464,8 @@ def main():
         if laser_on:
             set_laser_power(False)
             print("Laser + relay OFF (cleanup)")
+        tracker.release()
+        print("Pan/tilt re-centered and released (cleanup)")
         writer.release()
         picam2.stop()
         cv2.destroyAllWindows()
