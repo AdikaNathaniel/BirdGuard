@@ -52,7 +52,18 @@ try:
         cv2.imshow(window_name, hud)
         
         # waitKeyEx captures extended arrow key scan codes across Linux/Wayland/X11
-        key = cv2.waitKeyEx(30)
+        raw_key = cv2.waitKeyEx(30)
+
+        # Window closed with its X button -> quit
+        if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
+            break
+        if raw_key == -1:  # no key pressed this cycle
+            continue
+
+        # On Linux, Num Lock / Caps Lock add modifier bits above 0xFFFF
+        # (e.g. 'q' arrives as 0x100071), so strip them before comparing.
+        # Windows arrow codes (2490368 etc.) are kept as-is.
+        key = raw_key if raw_key > 0xFFFFF and (raw_key & 0xFFFF) == 0 else raw_key & 0xFFFF
 
         if key in (ord('q'), ord('Q'), 27):  # 27 = ESC
             break
@@ -84,6 +95,9 @@ try:
             current_tilt = int(TILT_START_DEG)
             pwm.set_angle(PAN_CHANNEL, current_pan)
             pwm.set_angle(TILT_CHANNEL, current_tilt)
+
+        else:
+            print(f"Unrecognised key code: {raw_key} (after mask: {key})")
 
 finally:
     pwm.release()

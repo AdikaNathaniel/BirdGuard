@@ -7,9 +7,13 @@ class PersonDetector:
         self.model = YOLO(model_path)
         self.confidence = confidence
         self.imgsz = imgsz
-        # COCO class id for "person" is 0; resolve by name to be safe
+        # Resolve the class id by name. No fallback: an unknown name must not
+        # silently become class 0 ("person") and aim the laser at people.
         self.class_id = next(
-            (i for i, name in self.model.names.items() if name == target_class), 0)
+            (i for i, name in self.model.names.items() if name == target_class), None)
+        if self.class_id is None:
+            raise ValueError(f"Unknown target class {target_class!r}. "
+                             f"Choose one of: {', '.join(self.model.names.values())}")
 
     def detect(self, frame):
         results = self.model.predict(

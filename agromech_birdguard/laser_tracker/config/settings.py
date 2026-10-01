@@ -14,7 +14,10 @@ CAMERA_BRIGHTNESS = 0.2         # -1.0 (dark) .. 1.0 (bright), 0 = normal
 
 # ---------- Model ----------
 # Set absolute path for the model
-MODEL_PATH = str(BASE_DIR / "models" / "yolo11n_ncnn_model")
+# YOLOv8n -- same model as pi-nano-laser/pi_person_detector_cpu.py
+MODEL_PATH = str(BASE_DIR / "models" / "yolov8n.pt")
+# Previous model (YOLO11n exported to NCNN), switch back by uncommenting:
+# MODEL_PATH = str(BASE_DIR / "models" / "yolo11n_ncnn_model")
 CONFIDENCE = 0.5
 TARGET_CLASS = "person"
 INFERENCE_SIZE = 640

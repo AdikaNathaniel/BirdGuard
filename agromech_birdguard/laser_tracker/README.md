@@ -52,7 +52,8 @@ yolo export model=yolo11n.pt format=ncnn
 | --- | --- | --- |
 | 1 | python tests/test_01_camera.py | camera frames at set FPS |
 | 2 | python tests/test_02_detection.py | YOLO detects "person" |
-| 3 | python tests/test_03_servo.py | pan/tilt sweep |
+| 3a | python tests/test_03a_servo.py | pan/tilt sweep |
+| 3b | python tests/test_03b_servo.py | manual pan/tilt with arrow keys |
 | 4 | python tests/test_04_laser.py | laser on/off |
 | 5 | python tests/test_05_ai_laser.py | person => laser on |
 | 6 | python tests/test_06_tracking.py | servos track, laser on target |
