@@ -78,7 +78,9 @@ TILT_START_DEG = 90
 # excluded as mis-clicks). A negative DEG_TO_FRAME_EDGE flips that direction.
 PAN_AT_FRAME_CENTER = 74.5    # servo pan that puts the dot at the picture centre
 TILT_AT_FRAME_CENTER = 109.0  # servo tilt that puts the dot at the picture centre
-PAN_DEG_TO_FRAME_EDGE = 36.0  # pan change from centre to right edge (+ = pan up moves right)
+PAN_DEG_TO_FRAME_EDGE = -36.0 # pan change from centre to right edge (+ = pan up moves right)
+                               # Negative: flipped after a live test showed the pan servo
+                               # turning away from the person with +36.
 TILT_DEG_TO_FRAME_EDGE = 36.0 # tilt change from centre to bottom edge (+ = tilt up moves down)
 # If a good calibration from calibrate_laser_aim.py exists, it is used
 # instead of the simple centre/edge numbers above.
