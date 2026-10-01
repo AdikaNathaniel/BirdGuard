@@ -67,8 +67,28 @@ PAN_MIN_DEG, PAN_MAX_DEG = 0, 180
 TILT_MIN_DEG, TILT_MAX_DEG = 40, 140   # keeps laser pointed at backdrop
 PAN_START_DEG = 90
 TILT_START_DEG = 90
-TRACK_GAIN = 30.0             # deg correction per unit normalized error
-DEAD_ZONE = 0.05              # ignore error within 5% of frame center
+# The camera is fixed and only the laser moves, so each pixel always maps to
+# the same pan/tilt angles. Every frame the angles are recalculated fresh
+# from the target's centre (nothing accumulates, so it can't drift to a limit):
+#   err_x = (cx - FRAME_WIDTH/2) / (FRAME_WIDTH/2)     -1 left .. +1 right
+#   err_y = (cy - FRAME_HEIGHT/2) / (FRAME_HEIGHT/2)   -1 top  .. +1 bottom
+#   pan   = PAN_AT_FRAME_CENTER  + err_x * PAN_DEG_TO_FRAME_EDGE
+#   tilt  = TILT_AT_FRAME_CENTER + err_y * TILT_DEG_TO_FRAME_EDGE
+# Values estimated from the first 9-point calibration run (right-edge points
+# excluded as mis-clicks). A negative DEG_TO_FRAME_EDGE flips that direction.
+PAN_AT_FRAME_CENTER = 74.5    # servo pan that puts the dot at the picture centre
+TILT_AT_FRAME_CENTER = 109.0  # servo tilt that puts the dot at the picture centre
+PAN_DEG_TO_FRAME_EDGE = 36.0  # pan change from centre to right edge (+ = pan up moves right)
+TILT_DEG_TO_FRAME_EDGE = 36.0 # tilt change from centre to bottom edge (+ = tilt up moves down)
+# If a good calibration from calibrate_laser_aim.py exists, it is used
+# instead of the simple centre/edge numbers above.
+CALIBRATION_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "laser_aim_calibration.json")
+AIM_SMOOTHING = 0.5           # 0..1 -- fraction of the way to the new aim per frame
+                               # (1 = jump straight there, lower = steadier but slower)
+MIN_MOVE_DEG = 1.0            # skip moves smaller than this (stops servo buzzing)
+MAX_CALIBRATION_ERROR_DEG = 3.0  # ignore a calibration file with a worse fit than this
+RETURN_HOME_DELAY = 3.0       # seconds without a person before servos re-center
 
 # Same Atlas cluster/database the NestJS backend uses -- the Pi writes
 # detection events directly, the backend's detection-service only reads.
@@ -145,40 +165,101 @@ def rotate_frame(frame):
 
 
 # --- PAN/TILT TRACKING ---
+def pixel_terms(x, y, quadratic):
+    # Must match pixel_terms() in calibrate_laser_aim.py. Pixels are scaled
+    # to roughly -1..1; the quadratic terms (8+ calibration points) capture
+    # the curve from pan and tilt interacting on the pan/tilt head.
+    u = (x - FRAME_WIDTH / 2) / (FRAME_WIDTH / 2)
+    v = (y - FRAME_HEIGHT / 2) / (FRAME_HEIGHT / 2)
+    return [u, v, 1.0] + ([u * u, v * v, u * v] if quadratic else [])
+
+
+def load_calibration(path=CALIBRATION_PATH):
+    # Returns (pan_coef, tilt_coef), or None to use the simple centre/edge
+    # mapping (PAN_AT_FRAME_CENTER etc.) when there is no usable calibration.
+    if not os.path.exists(path):
+        print(f"No aim calibration at {path} -- using simple centre/edge mapping.")
+        return None
+    with open(path) as f:
+        cal = json.load(f)
+    if cal.get("version") != 2:
+        print("Aim calibration is from an older calibrate_laser_aim.py -- ignoring it, "
+              "using simple centre/edge mapping.")
+        return None
+    if (cal.get("frame_size") != [FRAME_WIDTH, FRAME_HEIGHT]
+            or cal.get("camera_rotation") != CAMERA_ROTATION):
+        print("Aim calibration was made with a different frame size/rotation -- ignoring it, "
+              "using simple centre/edge mapping.")
+        return None
+    rms = cal.get("rms_error_deg", {})
+    if max(rms.get("pan", 99), rms.get("tilt", 99)) > MAX_CALIBRATION_ERROR_DEG:
+        print(f"Aim calibration fit error too high (pan {rms.get('pan', 99):.1f} / tilt "
+              f"{rms.get('tilt', 99):.1f} deg) -- ignoring it, using simple centre/edge mapping.")
+        return None
+    print(f"Aim calibration loaded ({len(cal.get('points', []))} points, "
+          f"fit error pan {rms.get('pan', 0):.2f} / tilt {rms.get('tilt', 0):.2f} deg)")
+    return cal["pan"], cal["tilt"]
+
+
 class PanTiltTracker:
-    """Proportional pan/tilt control that steers the target bbox to frame centre.
+    """Aims the laser straight at a pixel (fixed camera, only the laser moves).
+
+    Each frame computes absolute target angles fresh from the person's pixel
+    position -- from calibrate_laser_aim.py's fit if there is a good one,
+    otherwise the simple centre/edge mapping -- so nothing builds
+    up over time and it can't drift off to a range limit. With no person for
+    RETURN_HOME_DELAY seconds it re-centers.
 
     The PCA9685 gives no position feedback, so `pan`/`tilt` are the last
     commanded angles -- the only record of where the servos are.
     """
 
-    def __init__(self):
+    def __init__(self, calibration):
+        self.calibration = calibration
         self.kit = ServoKit(channels=16, address=PCA9685_I2C_ADDRESS)
         for ch in (PAN_CHANNEL, TILT_CHANNEL):
             self.kit.servo[ch].set_pulse_width_range(SERVO_MIN_US, SERVO_MAX_US)
+        self.at_home = False
         self.center()
 
     def center(self):
-        self.pan = PAN_START_DEG
-        self.tilt = TILT_START_DEG
+        self.move_to(PAN_START_DEG, TILT_START_DEG)
+        self.at_home = True
+
+    def move_to(self, pan, tilt):
+        self.pan = max(PAN_MIN_DEG, min(PAN_MAX_DEG, pan))
+        self.tilt = max(TILT_MIN_DEG, min(TILT_MAX_DEG, tilt))
         self.kit.servo[PAN_CHANNEL].angle = self.pan
         self.kit.servo[TILT_CHANNEL].angle = self.tilt
 
-    def update(self, bbox, frame_w, frame_h):
+    def angles_for_pixel(self, x, y):
+        if self.calibration is None:
+            # Simple centre/edge mapping, recalculated fresh every frame
+            err_x = (x - FRAME_WIDTH / 2) / (FRAME_WIDTH / 2)
+            err_y = (y - FRAME_HEIGHT / 2) / (FRAME_HEIGHT / 2)
+            return (PAN_AT_FRAME_CENTER + err_x * PAN_DEG_TO_FRAME_EDGE,
+                    TILT_AT_FRAME_CENTER + err_y * TILT_DEG_TO_FRAME_EDGE)
+        pan_coef, tilt_coef = self.calibration
+        terms = pixel_terms(x, y, quadratic=len(pan_coef) == 6)
+        return (sum(c * t for c, t in zip(pan_coef, terms)),
+                sum(c * t for c, t in zip(tilt_coef, terms)))
+
+    def aim_at(self, x, y):
+        target_pan, target_tilt = self.angles_for_pixel(x, y)
+        pan = self.pan + AIM_SMOOTHING * (target_pan - self.pan)
+        tilt = self.tilt + AIM_SMOOTHING * (target_tilt - self.tilt)
+        if abs(pan - self.pan) >= MIN_MOVE_DEG or abs(tilt - self.tilt) >= MIN_MOVE_DEG:
+            self.move_to(pan, tilt)
+        self.at_home = False
+
+    def update(self, bbox):
         x1, y1, x2, y2 = bbox
-        err_x = ((x1 + x2) / 2 - frame_w / 2) / (frame_w / 2)   # -1 .. 1
-        err_y = ((y1 + y2) / 2 - frame_h / 2) / (frame_h / 2)
+        self.aim_at((x1 + x2) / 2, (y1 + y2) / 2)
 
-        # NOTE: if it tracks AWAY from the person, flip the sign of these two lines
-        if abs(err_x) > DEAD_ZONE:
-            self.pan -= err_x * TRACK_GAIN
-        if abs(err_y) > DEAD_ZONE:
-            self.tilt += err_y * TRACK_GAIN
-
-        self.pan = max(PAN_MIN_DEG, min(PAN_MAX_DEG, self.pan))
-        self.tilt = max(TILT_MIN_DEG, min(TILT_MAX_DEG, self.tilt))
-        self.kit.servo[PAN_CHANNEL].angle = self.pan
-        self.kit.servo[TILT_CHANNEL].angle = self.tilt
+    def target_lost(self, seconds_since_seen):
+        if not self.at_home and seconds_since_seen > RETURN_HOME_DELAY:
+            self.center()
+            print(">>> Target lost -- pan/tilt re-centered")
 
     def release(self):
         # Re-center, then stop holding torque
@@ -294,7 +375,7 @@ def main():
           f"{TILT_CHANNEL} (tilt) | Camera rotation: {CAMERA_ROTATION} deg")
 
     set_laser_power(False)  # laser + relay OFF at startup
-    tracker = PanTiltTracker()  # servos to start position
+    tracker = PanTiltTracker(load_calibration())  # servos to start position
 
     # UDP socket for broadcasting each detection's bounding box to any
     # local listener (e.g. a future pan/tilt tracking process) -- fire
@@ -387,11 +468,13 @@ def main():
                     sock.sendto(json.dumps(payload).encode(), (UDP_IP, UDP_PORT))
 
             # --- PAN/TILT TRACKING (every frame a person is visible) ---
-            # Steer toward the highest-confidence person. With no person in
-            # view the servos simply hold their last position.
+            # Aim straight at the highest-confidence person's pixel position.
+            # With no person for RETURN_HOME_DELAY seconds, re-center.
             if detections:
                 tx1, ty1, tx2, ty2, _, _ = max(detections, key=lambda d: d[5])
-                tracker.update((tx1, ty1, tx2, ty2), frame.shape[1], frame.shape[0])
+                tracker.update((tx1, ty1, tx2, ty2))
+            else:
+                tracker.target_lost(time.time() - last_detection_time)
 
             # --- LASER + POWER RELAY CONTROL ---
             # (Pi GPIO12 -> Nano D2 -> Nano D6 -> laser trigger,
