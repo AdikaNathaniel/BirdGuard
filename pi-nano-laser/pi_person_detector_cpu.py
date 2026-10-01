@@ -91,8 +91,12 @@ AIM_SMOOTHING = 0.5           # 0..1 -- fraction of the way to the new aim per f
 MIN_MOVE_DEG = 1.0            # skip moves smaller than this (stops servo buzzing)
 MAX_CALIBRATION_ERROR_DEG = 3.0  # ignore a calibration file with a worse fit than this
 RETURN_HOME_DELAY = 3.0       # seconds without a person before servos re-center
-# Constant aim correction (degrees) added to every aim, measured live with
-# `--adjust` and saved here. Missing file = no correction.
+# Constant aim correction (degrees) added to every aim. Measured live with
+# `--adjust` on 2026-10-01 (person target): pan +30.5, tilt -16.0.
+AIM_OFFSET_PAN_DEG = 30.5
+AIM_OFFSET_TILT_DEG = -16.0
+# A newer `--adjust` result saved with `x` goes to this file and *replaces*
+# the two values above (it is never added on top of them).
 AIM_OFFSET_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                "laser_aim_offset.json")
 ADJUST_STEPS_DEG = [0.5, 1.0, 2.0, 5.0]   # step sizes in --adjust mode
@@ -209,11 +213,14 @@ def load_calibration(path=CALIBRATION_PATH):
 
 
 def load_aim_offset(path=AIM_OFFSET_PATH):
+    # Saved --adjust file replaces the in-code defaults (never added to them)
     if not os.path.exists(path):
-        return 0.0, 0.0
+        print(f"Aim offset (in code): pan {AIM_OFFSET_PAN_DEG:+.1f} / tilt {AIM_OFFSET_TILT_DEG:+.1f} deg")
+        return AIM_OFFSET_PAN_DEG, AIM_OFFSET_TILT_DEG
     with open(path) as f:
         off = json.load(f)
-    print(f"Aim offset loaded: pan {off['pan']:+.1f} / tilt {off['tilt']:+.1f} deg")
+    print(f"Aim offset (from {os.path.basename(path)}): "
+          f"pan {off['pan']:+.1f} / tilt {off['tilt']:+.1f} deg")
     return float(off["pan"]), float(off["tilt"])
 
 
