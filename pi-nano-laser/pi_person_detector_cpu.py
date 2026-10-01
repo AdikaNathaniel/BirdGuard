@@ -91,6 +91,11 @@ AIM_SMOOTHING = 0.5           # 0..1 -- fraction of the way to the new aim per f
 MIN_MOVE_DEG = 1.0            # skip moves smaller than this (stops servo buzzing)
 MAX_CALIBRATION_ERROR_DEG = 3.0  # ignore a calibration file with a worse fit than this
 RETURN_HOME_DELAY = 3.0       # seconds without a person before servos re-center
+# Constant aim correction (degrees) added to every aim, measured live with
+# `--adjust` and saved here. Missing file = no correction.
+AIM_OFFSET_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "laser_aim_offset.json")
+ADJUST_STEPS_DEG = [0.5, 1.0, 2.0, 5.0]   # step sizes in --adjust mode
 
 # Same Atlas cluster/database the NestJS backend uses -- the Pi writes
 # detection events directly, the backend's detection-service only reads.
@@ -203,6 +208,53 @@ def load_calibration(path=CALIBRATION_PATH):
     return cal["pan"], cal["tilt"]
 
 
+def load_aim_offset(path=AIM_OFFSET_PATH):
+    if not os.path.exists(path):
+        return 0.0, 0.0
+    with open(path) as f:
+        off = json.load(f)
+    print(f"Aim offset loaded: pan {off['pan']:+.1f} / tilt {off['tilt']:+.1f} deg")
+    return float(off["pan"]), float(off["tilt"])
+
+
+def save_aim_offset(pan, tilt, path=AIM_OFFSET_PATH):
+    with open(path, "w") as f:
+        json.dump({"pan": pan, "tilt": tilt,
+                   "saved_at": datetime.now().isoformat(timespec="seconds")}, f, indent=2)
+    print(f"\n>>> Saved aim offset pan {pan:+.1f} / tilt {tilt:+.1f} deg -> {path}")
+
+
+class KeyReader:
+    """Single key presses from the terminal (works over SSH), read on a thread.
+
+    Puts the terminal in cbreak mode (no Enter needed, Ctrl+C still works)
+    and restores it on close.
+    """
+
+    def __init__(self):
+        import queue, sys, termios, tty
+        self._sys, self._termios = sys, termios
+        self.keys = queue.Queue()
+        self._fd = sys.stdin.fileno()
+        self._old = termios.tcgetattr(self._fd)
+        tty.setcbreak(self._fd)
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def _run(self):
+        while True:
+            ch = self._sys.stdin.read(1)
+            if not ch:
+                return
+            self.keys.put(ch)
+
+    def get(self):
+        # Next pending key, or None
+        return None if self.keys.empty() else self.keys.get_nowait()
+
+    def close(self):
+        self._termios.tcsetattr(self._fd, self._termios.TCSADRAIN, self._old)
+
+
 class PanTiltTracker:
     """Aims the laser straight at a pixel (fixed camera, only the laser moves).
 
@@ -216,8 +268,10 @@ class PanTiltTracker:
     commanded angles -- the only record of where the servos are.
     """
 
-    def __init__(self, calibration):
+    def __init__(self, calibration, offset=(0.0, 0.0)):
         self.calibration = calibration
+        # Constant correction added to every aim (measured with --adjust)
+        self.offset_pan, self.offset_tilt = offset
         self.kit = ServoKit(channels=16, address=PCA9685_I2C_ADDRESS)
         for ch in (PAN_CHANNEL, TILT_CHANNEL):
             self.kit.servo[ch].set_pulse_width_range(SERVO_MIN_US, SERVO_MAX_US)
@@ -248,10 +302,15 @@ class PanTiltTracker:
 
     def aim_at(self, x, y):
         target_pan, target_tilt = self.angles_for_pixel(x, y)
-        pan = self.pan + AIM_SMOOTHING * (target_pan - self.pan)
-        tilt = self.tilt + AIM_SMOOTHING * (target_tilt - self.tilt)
-        if abs(pan - self.pan) >= MIN_MOVE_DEG or abs(tilt - self.tilt) >= MIN_MOVE_DEG:
-            self.move_to(pan, tilt)
+        target_pan += self.offset_pan
+        target_tilt += self.offset_tilt
+        # Compare the remaining distance to the *target* (not the smoothed
+        # step), otherwise smoothing halves every step and the servo stalls
+        # up to 2 * MIN_MOVE_DEG short of where it should be.
+        if (abs(target_pan - self.pan) >= MIN_MOVE_DEG
+                or abs(target_tilt - self.tilt) >= MIN_MOVE_DEG):
+            self.move_to(self.pan + AIM_SMOOTHING * (target_pan - self.pan),
+                         self.tilt + AIM_SMOOTHING * (target_tilt - self.tilt))
         self.at_home = False
 
     def update(self, bbox):
@@ -366,10 +425,66 @@ def get_lan_ip():
         s.close()
 
 
+def parse_args():
+    import argparse
+    parser = argparse.ArgumentParser(description="BirdGuard CPU detector + pan/tilt laser")
+    parser.add_argument("--adjust", action="store_true",
+                        help="live aim adjustment: nudge the aim with keys in this terminal "
+                             "and save the correction to laser_aim_offset.json")
+    parser.add_argument("--target", default=TARGET_CLASS,
+                        help=f"object class to track (default: {TARGET_CLASS})")
+    parser.add_argument("--conf", type=float, default=CONFIDENCE_THRESHOLD,
+                        help=f"detection confidence threshold (default: {CONFIDENCE_THRESHOLD})")
+    return parser.parse_args()
+
+
+ADJUST_HELP = """
+--- AIM ADJUST MODE --- (press keys in THIS terminal, no Enter needed)
+  a / d    pan offset  - / +
+  w / s    tilt offset + / -
+  [ / ]    step size smaller / bigger
+  r        reset offset to 0
+  p        print current offset
+  x        SAVE offset (used on every later run)
+  Ctrl+C   stop
+Watch the laser dot vs the white circle (aim point) in the browser preview.
+If a key moves the dot the wrong way, use the opposite key.
+"""
+
+
+def handle_adjust_key(key, tracker, step_i):
+    # Returns the (possibly changed) step index
+    step = ADJUST_STEPS_DEG[step_i]
+    if key == "a":
+        tracker.offset_pan -= step
+    elif key == "d":
+        tracker.offset_pan += step
+    elif key == "w":
+        tracker.offset_tilt += step
+    elif key == "s":
+        tracker.offset_tilt -= step
+    elif key == "[":
+        step_i = max(0, step_i - 1)
+    elif key == "]":
+        step_i = min(len(ADJUST_STEPS_DEG) - 1, step_i + 1)
+    elif key == "r":
+        tracker.offset_pan = tracker.offset_tilt = 0.0
+    elif key == "x":
+        save_aim_offset(tracker.offset_pan, tracker.offset_tilt)
+        return step_i
+    elif key != "p":
+        return step_i
+    print(f"\n>>> offset pan {tracker.offset_pan:+.1f} / tilt {tracker.offset_tilt:+.1f} deg "
+          f"(step {ADJUST_STEPS_DEG[step_i]} deg)")
+    return step_i
+
+
 def main():
     global latest_frame
+    args = parse_args()
+    target_class, confidence = args.target, args.conf
     print(f"Session: {SESSION_DIR}")
-    print(f"Target: {TARGET_CLASS.upper()} | Confidence: {CONFIDENCE_THRESHOLD}")
+    print(f"Target: {target_class.upper()} | Confidence: {confidence}")
     print(f"Video: {VIDEO_PATH}")
     print(f"Laser trigger: GPIO{LASER_GPIO} -> Nano D2 -> Nano D6 -> laser")
     print(f"Power relay: GPIO{POWER_RELAY_GPIO} -> relay IN1 -> laser PSU")
@@ -377,7 +492,7 @@ def main():
           f"{TILT_CHANNEL} (tilt) | Camera rotation: {CAMERA_ROTATION} deg")
 
     set_laser_power(False)  # laser + relay OFF at startup
-    tracker = PanTiltTracker(load_calibration())  # servos to start position
+    tracker = PanTiltTracker(load_calibration(), load_aim_offset())  # servos to start position
 
     # UDP socket for broadcasting each detection's bounding box to any
     # local listener (e.g. a future pan/tilt tracking process) -- fire
@@ -425,7 +540,13 @@ def main():
     detection_count = 0
     last_write_time = time.time()
 
-    print(f"\nWatching for {TARGET_CLASS.upper()}... (Ctrl+C to stop)\n")
+    print(f"\nWatching for {target_class.upper()}... (Ctrl+C to stop)\n")
+
+    keys = None
+    step_i = 1
+    if args.adjust:
+        print(ADJUST_HELP)
+        keys = KeyReader()
 
     try:
         while True:
@@ -436,18 +557,18 @@ def main():
             frame = rotate_frame(picam2.capture_array())
             bgr = frame
 
-            results = model.predict(frame, conf=CONFIDENCE_THRESHOLD, verbose=False)[0]
+            results = model.predict(frame, conf=confidence, verbose=False)[0]
             target_found = False
             detections = []
 
             # Walk every detected box this frame and keep only the ones
-            # matching TARGET_CLASS ("person") -- YOLO detects many object
+            # matching target_class ("person") -- YOLO detects many object
             # classes, but only this one drives the laser/logging below.
             for box in results.boxes:
                 class_id = int(box.cls[0])
                 label = model.names[class_id]
 
-                if label == TARGET_CLASS:
+                if label == target_class:
                     target_found = True
                     last_detection_time = time.time()
 
@@ -455,7 +576,8 @@ def main():
                     conf = float(box.conf[0])
                     detections.append((x1, y1, x2, y2, label, conf))
 
-                    print(f"[{datetime.now().strftime('%H:%M:%S')}] DETECTED: {label.upper()} | conf: {conf:.2f}")
+                    if not args.adjust:  # keep the terminal readable while adjusting
+                        print(f"[{datetime.now().strftime('%H:%M:%S')}] DETECTED: {label.upper()} | conf: {conf:.2f}")
 
                     # Broadcast this detection's box over UDP -- fire and
                     # forget, for any downstream process that wants it
@@ -468,6 +590,13 @@ def main():
                         "bbox": {"x1": x1, "y1": y1, "x2": x2, "y2": y2}
                     }
                     sock.sendto(json.dumps(payload).encode(), (UDP_IP, UDP_PORT))
+
+            # --- LIVE AIM ADJUSTMENT (--adjust) ---
+            if keys:
+                key = keys.get()
+                while key:
+                    step_i = handle_adjust_key(key.lower(), tracker, step_i)
+                    key = keys.get()
 
             # --- PAN/TILT TRACKING (every frame a person is visible) ---
             # Aim straight at the highest-confidence person's pixel position.
@@ -495,7 +624,8 @@ def main():
                 # the highest-confidence detection in this frame.
                 top = max(detections, key=lambda d: d[5])
                 x1, y1, x2, y2, top_label, top_conf = top
-                log_detection_event(top_label, top_conf, {"x1": x1, "y1": y1, "x2": x2, "y2": y2})
+                if not args.adjust:  # adjustment sessions aren't real detections
+                    log_detection_event(top_label, top_conf, {"x1": x1, "y1": y1, "x2": x2, "y2": y2})
 
             elif not target_found and laser_on:
                 if time.time() - last_detection_time > LASER_OFF_DELAY:
@@ -516,11 +646,14 @@ def main():
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
                 cv2.imwrite(f"{DETECTIONS_DIR}/frame_{frame_count:05d}.jpg", video_frame)
                 detection_count += 1
-            # Crosshair = frame centre (where tracking steers the person to)
-            # plus the current commanded servo angles, for checking tracking
-            cv2.drawMarker(video_frame, (FRAME_WIDTH // 2, FRAME_HEIGHT // 2),
-                           (0, 0, 255), cv2.MARKER_CROSS, 30, 2)
-            cv2.putText(video_frame, f"pan {tracker.pan:.0f}  tilt {tracker.tilt:.0f}",
+            # Aim point (centre of the tracked box) -- where the laser dot
+            # should land -- plus the commanded servo angles and aim offset
+            if detections:
+                tx1, ty1, tx2, ty2, _, _ = max(detections, key=lambda d: d[5])
+                cv2.circle(video_frame, ((tx1 + tx2) // 2, (ty1 + ty2) // 2), 12, (255, 255, 255), 2)
+            cv2.putText(video_frame,
+                        f"pan {tracker.pan:.0f}  tilt {tracker.tilt:.0f}  "
+                        f"offset {tracker.offset_pan:+.1f}/{tracker.offset_tilt:+.1f}",
                         (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
 
             # Inference doesn't run at a perfectly steady frame rate, so
@@ -551,6 +684,10 @@ def main():
             print("Laser + relay OFF (cleanup)")
         tracker.release()
         print("Pan/tilt re-centered and released (cleanup)")
+        if keys:
+            keys.close()
+            print(f"Final offset: pan {tracker.offset_pan:+.1f} / tilt {tracker.offset_tilt:+.1f} deg "
+                  "(only kept if you pressed x to save)")
         writer.release()
         picam2.stop()
         cv2.destroyAllWindows()
