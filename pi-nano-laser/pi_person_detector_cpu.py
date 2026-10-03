@@ -29,14 +29,12 @@ signal.signal(signal.SIGTERM, _handle_sigterm)
 # detection events get broadcast, what counts as a "person" detection, and
 # the camera/recording settings. Kept together at the top so none of this
 # needs hunting through the rest of the file to adjust.
-LASER_GPIO = 12               # Pi GPIO12 -> Nano D2 -> Nano D6 -> laser
-POWER_RELAY_GPIO = 17         # Pi GPIO17 -> 2-channel relay IN1 -> laser PSU positive wire.
-                               # Cuts the laser's power supply entirely (not just the trigger
-                               # signal) whenever no person is being detected, for energy
-                               # saving and as a true hardware-level off between detections
-                               # rather than just holding the Nano's trigger line low. Follows
-                               # the exact same on/off timing as LASER_GPIO below -- both are
-                               # driven together at every transition, never independently.
+LASER_GPIO = 12               # Pi GPIO12 (pin 32) -> jumper onto PCA9685 ch 12 PWM pin -> laser PWM
+                               # pin (laser GND -> PCA9685 ch 12 GND). No Arduino Nano any more.
+POWER_RELAY_GPIO = 17         # Pi GPIO17 (pin 11) -> 2-channel relay IN1. Relay COM/NO switch the
+                               # laser power supply's positive line to the laser module, so the
+                               # laser is unpowered whenever no person is being detected. Both pins
+                               # are driven together at every transition, never independently.
 UDP_IP = "127.0.0.1"
 UDP_PORT = 5005
 TARGET_CLASS = "person"
@@ -128,9 +126,8 @@ os.makedirs(DETECTIONS_DIR, exist_ok=True)
 def set_gpio(pin: int, high: bool):
     # Drives a pin via the `pinctrl` CLI tool rather than a Python GPIO
     # library. `dh`/`dl` = "digital high" / "digital low" in pinctrl's own
-    # syntax. Shared by both LASER_GPIO (read by the Arduino Nano, D2) and
-    # POWER_RELAY_GPIO (drives the relay module directly) -- same call,
-    # different pin number.
+    # syntax. Shared by LASER_GPIO (laser PWM pin, via PCA9685 ch 12) and
+    # POWER_RELAY_GPIO (relay IN1) -- same call, different pin number.
     state = "dh" if high else "dl"
     try:
         subprocess.run(["pinctrl", "set", str(pin), "op", state], check=True)
@@ -139,9 +136,9 @@ def set_gpio(pin: int, high: bool):
 
 
 def set_laser_power(high: bool):
-    # Toggles the laser's trigger signal and its power-relay together --
-    # every call site in this file wants both at once, so callers never
-    # have to remember to drive both pins themselves.
+    # Toggles the laser's PWM signal and the relay together -- every call
+    # site in this file wants both at once, so callers never have to
+    # remember to drive both pins themselves.
     set_gpio(LASER_GPIO, high)
     set_gpio(POWER_RELAY_GPIO, high)
 
@@ -493,8 +490,8 @@ def main():
     print(f"Session: {SESSION_DIR}")
     print(f"Target: {target_class.upper()} | Confidence: {confidence}")
     print(f"Video: {VIDEO_PATH}")
-    print(f"Laser trigger: GPIO{LASER_GPIO} -> Nano D2 -> Nano D6 -> laser")
-    print(f"Power relay: GPIO{POWER_RELAY_GPIO} -> relay IN1 -> laser PSU")
+    print(f"Laser PWM: GPIO{LASER_GPIO} -> PCA9685 ch 12 PWM pin -> laser PWM (GND -> ch 12 GND)")
+    print(f"Relay: GPIO{POWER_RELAY_GPIO} -> relay IN1 (COM/NO switch laser PSU +)")
     print(f"Pan/tilt: PCA9685 0x{PCA9685_I2C_ADDRESS:02X} channel {PAN_CHANNEL} (pan) / "
           f"{TILT_CHANNEL} (tilt) | Camera rotation: {CAMERA_ROTATION} deg")
 
@@ -614,9 +611,9 @@ def main():
             else:
                 tracker.target_lost(time.time() - last_detection_time)
 
-            # --- LASER + POWER RELAY CONTROL ---
-            # (Pi GPIO12 -> Nano D2 -> Nano D6 -> laser trigger,
-            #  Pi GPIO17 -> relay IN1 -> laser PSU positive -> laser power)
+            # --- LASER + RELAY CONTROL ---
+            # (Pi GPIO12 -> PCA9685 ch 12 PWM pin -> laser PWM pin,
+            #  Pi GPIO17 -> relay IN1, relay COM/NO -> laser PSU + -> laser power)
             # Edge-triggered, not level-triggered: both turn on once when a
             # person first appears, and off only after they've been gone
             # for LASER_OFF_DELAY seconds (debounced so brief gaps in
